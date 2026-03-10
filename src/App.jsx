@@ -728,7 +728,18 @@ function KioskPayment({ cart, products, onPaid, verificationId, kioskId, venueId
 // ============================================================
 // KIOSK — CONFIRMATION
 // ============================================================
-function KioskConfirmation({ cart, products, orderId }) {
+function KioskConfirmation({ cart, products, orderId, onReset }) {
+  const [countdown, setCountdown] = useState(15);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCountdown(c => {
+        if (c <= 1) { clearInterval(interval); onReset(); return 0; }
+        return c - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [onReset]);
   const items = Object.entries(cart).map(([id, qty]) => {
     const p = products.find(x => x.id === id);
     return p ? { ...p, qty } : null;
@@ -758,6 +769,12 @@ function KioskConfirmation({ cart, products, orderId }) {
       </div>
       <div style={{ padding: "16px 24px", borderRadius: 12, background: DS.colors.accentGlow, border: `1px solid ${DS.colors.accent}`, color: DS.colors.accent, fontSize: 16, fontWeight: 600, textAlign: "center" }}>
         👤 A staff member will bring your order to you shortly
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+        <div style={{ fontSize: 13, color: DS.colors.textMuted }}>
+          Returning to start in <strong style={{ color: DS.colors.white }}>{countdown}</strong> seconds…
+        </div>
+        <button className="btn-sm btn-outline" onClick={onReset}>Start New Order</button>
       </div>
     </div>
   );
@@ -844,7 +861,7 @@ function KioskView() {
         />
       )}
       {screen === "confirm" && (
-        <KioskConfirmation cart={cart} products={products} orderId={placedOrderId} />
+        <KioskConfirmation cart={cart} products={products} orderId={placedOrderId} onReset={() => { setCart({}); setVerificationId(null); setPlacedOrderId(null); setScreen("welcome"); }} />
       )}
       {screen !== "welcome" && <KioskProgress step={step} />}
     </div>
