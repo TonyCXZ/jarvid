@@ -1078,6 +1078,10 @@ function ManagerView({ user }) {
   const [selectedDay, setSelectedDay] = useState(null);
   const [dayDetail, setDayDetail] = useState(null);
   const [loadingDayDetail, setLoadingDayDetail] = useState(false);
+  const [analyticsView, setAnalyticsView] = useState("weekly");
+  const [analyticsData, setAnalyticsData] = useState([]);
+  const [loadingAnalytics, setLoadingAnalytics] = useState(false);
+  const [analyticsSelected, setAnalyticsSelected] = useState(null);
   const isOrgAdmin = user?.role === "org_admin";
   const VENUE_ID = selectedVenueId;
 
@@ -1111,6 +1115,7 @@ function ManagerView({ user }) {
     if (activeSection === "products" || activeSection === "inventory") loadProducts();
     if (activeSection === "compliance") loadCompliance();
     if (activeSection === "staff") loadStaff();
+    if (activeSection === "analytics") loadAnalytics("weekly");
   }, [activeSection, VENUE_ID]);
 
   const loadOverview = async () => {
@@ -1217,6 +1222,62 @@ function ManagerView({ user }) {
     setLoadingDayDetail(false);
   };
 
+  const loadAnalytics = async (view) => {
+    if (!VENUE_ID) return;
+    setLoadingAnalytics(true);
+    setAnalyticsView(view);
+    setAnalyticsSelected(null);
+
+    const { data: orders } = await supabase
+      .from("orders")
+      .select("total_pence, status, created_at")
+      .eq("venue_id", VENUE_ID)
+      .eq("status", "completed")
+      .order("created_at", { ascending: true });
+
+    const allOrders = orders || [];
+
+    if (view === "weekly") {
+      // Group by ISO week
+      const weekMap = {};
+      allOrders.forEach(o => {
+        const d = new Date(o.created_at);
+        const startOfWeek = new Date(d);
+        startOfWeek.setDate(d.getDate() - d.getDay() + 1); // Monday
+        startOfWeek.setHours(0,0,0,0);
+        const key = startOfWeek.toISOString().slice(0,10);
+        if (!weekMap[key]) weekMap[key] = { key, label: startOfWeek.toLocaleDateString("en-GB", { day: "numeric", month: "short" }), revenue: 0, orders: 0, startDate: new Date(startOfWeek) };
+        weekMap[key].revenue += o.total_pence || 0;
+        weekMap[key].orders += 1;
+      });
+      const weeks = Object.values(weekMap).sort((a, b) => a.startDate - b.startDate);
+      // Add wow (week-over-week) change
+      weeks.forEach((w, i) => {
+        w.prev = i > 0 ? weeks[i-1].revenue : null;
+        w.change = w.prev ? Math.round(((w.revenue - w.prev) / w.prev) * 100) : null;
+      });
+      setAnalyticsData(weeks);
+    } else {
+      // Group by month
+      const monthMap = {};
+      allOrders.forEach(o => {
+        const d = new Date(o.created_at);
+        const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+        const label = d.toLocaleDateString("en-GB", { month: "short", year: "numeric" });
+        if (!monthMap[key]) monthMap[key] = { key, label, revenue: 0, orders: 0, sortKey: key };
+        monthMap[key].revenue += o.total_pence || 0;
+        monthMap[key].orders += 1;
+      });
+      const months = Object.values(monthMap).sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+      months.forEach((m, i) => {
+        m.prev = i > 0 ? months[i-1].revenue : null;
+        m.change = m.prev ? Math.round(((m.revenue - m.prev) / m.prev) * 100) : null;
+      });
+      setAnalyticsData(months);
+    }
+    setLoadingAnalytics(false);
+  };
+
   const loadProducts = async () => {
     setLoadingProducts(true);
     const { data } = await supabase.from("products").select("*, inventory(quantity)").eq("venue_id", VENUE_ID).order("brand");
@@ -1250,6 +1311,7 @@ function ManagerView({ user }) {
 
   const navItems = [
     { id: "overview",   icon: "📊", label: "Overview" },
+    { id: "analytics",  icon: "📈", label: "Analytics" },
     { id: "products",   icon: "📦", label: "Products" },
     { id: "inventory",  icon: "🏭", label: "Inventory" },
     { id: "compliance", icon: "🔒", label: "Compliance" },
@@ -1421,6 +1483,142 @@ function ManagerView({ user }) {
                 </tbody>
               </table>
             </div>
+          </>
+        )}
+
+        {activeSection === "analytics" && (
+          <>
+            <div>
+              <div className="section-title">SALES ANALYTICS</div>
+              <div className="section-sub">All-time performance · click any row or bar to compare</div>
+            </div>
+
+            {/* Toggle */}
+            <div style={{ display: "flex", gap: 8, marginBottom: 4 }}>
+              {["weekly", "monthly"].map(v => (
+                <button key={v} className={`btn-sm ${analyticsView === v ? "btn-accent" : "btn-outline"}`}
+                  onClick={() => loadAnalytics(v)}
+                  style={{ textTransform: "capitalize", minWidth: 90 }}>
+                  {v === "weekly" ? "📅 Weekly" : "🗓 Monthly"}
+                </button>
+              ))}
+            </div>
+
+            {loadingAnalytics ? (
+              <div style={{ display: "flex", justifyContent: "center", padding: 40 }}><div className="spinner" /></div>
+            ) : analyticsData.length === 0 ? (
+              <div className="chart-card" style={{ textAlign: "center", padding: 40, color: DS.colors.textMuted }}>No sales data yet</div>
+            ) : (() => {
+              const maxRev = Math.max(...analyticsData.map(d => d.revenue), 1);
+              const totalRevenue = analyticsData.reduce((s, d) => s + d.revenue, 0);
+              const totalOrders = analyticsData.reduce((s, d) => s + d.orders, 0);
+              const bestPeriod = [...analyticsData].sort((a,b) => b.revenue - a.revenue)[0];
+              const avgPerPeriod = analyticsData.length > 0 ? totalRevenue / analyticsData.length : 0;
+
+              return (
+                <>
+                  {/* Summary stats */}
+                  <div className="stats-row">
+                    <div className="stat-card">
+                      <div className="stat-label">All-time Revenue</div>
+                      <div className="stat-value" style={{ fontSize: 20 }}>{fmt(penceToGBP(totalRevenue))}</div>
+                    </div>
+                    <div className="stat-card">
+                      <div className="stat-label">All-time Orders</div>
+                      <div className="stat-value" style={{ fontSize: 20 }}>{totalOrders}</div>
+                    </div>
+                    <div className="stat-card">
+                      <div className="stat-label">Avg per {analyticsView === "weekly" ? "Week" : "Month"}</div>
+                      <div className="stat-value" style={{ fontSize: 20 }}>{fmt(penceToGBP(avgPerPeriod))}</div>
+                    </div>
+                    <div className="stat-card">
+                      <div className="stat-label">Best {analyticsView === "weekly" ? "Week" : "Month"}</div>
+                      <div className="stat-value" style={{ fontSize: 20 }}>{fmt(penceToGBP(bestPeriod.revenue))}</div>
+                      <div className="stat-delta delta-up">{bestPeriod.label}</div>
+                    </div>
+                  </div>
+
+                  {/* Bar chart */}
+                  <div className="chart-card">
+                    <div className="chart-title">{analyticsView === "weekly" ? "Weekly" : "Monthly"} Revenue (£)</div>
+                    <div style={{ display: "flex", alignItems: "flex-end", gap: analyticsData.length > 20 ? 2 : 4, height: 120, marginTop: 8 }}>
+                      {analyticsData.map(d => (
+                        <div key={d.key} onClick={() => setAnalyticsSelected(analyticsSelected?.key === d.key ? null : d)}
+                          style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", cursor: "pointer", gap: 2 }}>
+                          <div style={{ fontSize: analyticsData.length > 16 ? 0 : 9, color: DS.colors.textSub }}>{d.revenue > 0 ? penceToGBP(d.revenue).toFixed(0) : ""}</div>
+                          <div style={{
+                            width: "100%", borderRadius: "3px 3px 0 0", minHeight: 4,
+                            height: `${(d.revenue / maxRev) * 90}px`,
+                            background: analyticsSelected?.key === d.key ? DS.colors.purple : DS.colors.accent,
+                            opacity: analyticsSelected && analyticsSelected.key !== d.key ? 0.35 : 0.85,
+                            transition: "all 0.2s"
+                          }} />
+                          <div style={{ fontSize: analyticsData.length > 20 ? 7 : 9, color: analyticsSelected?.key === d.key ? DS.colors.white : DS.colors.textMuted, whiteSpace: "nowrap" }}>{d.label}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Comparison table */}
+                  <div className="chart-card" style={{ padding: 0, overflow: "hidden" }}>
+                    <div style={{ padding: "14px 16px", borderBottom: `1px solid ${DS.colors.border}` }}>
+                      <div className="chart-title" style={{ marginBottom: 0 }}>Period Breakdown</div>
+                    </div>
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>{analyticsView === "weekly" ? "Week of" : "Month"}</th>
+                          <th>Revenue</th>
+                          <th>Orders</th>
+                          <th>Avg Order</th>
+                          <th>vs Previous</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[...analyticsData].reverse().map(d => (
+                          <tr key={d.key}
+                            onClick={() => setAnalyticsSelected(analyticsSelected?.key === d.key ? null : d)}
+                            style={{ cursor: "pointer", background: analyticsSelected?.key === d.key ? "rgba(124,92,191,0.1)" : "transparent" }}>
+                            <td style={{ fontWeight: analyticsSelected?.key === d.key ? 700 : 400 }}>{d.label}</td>
+                            <td style={{ color: DS.colors.accent, fontFamily: DS.font.display, fontSize: 15 }}>{fmt(penceToGBP(d.revenue))}</td>
+                            <td>{d.orders}</td>
+                            <td>{d.orders > 0 ? fmt(penceToGBP(d.revenue / d.orders)) : "—"}</td>
+                            <td>
+                              {d.change === null ? <span style={{ color: DS.colors.textMuted }}>—</span>
+                                : d.change >= 0
+                                  ? <span style={{ color: DS.colors.accent }}>↑ {d.change}%</span>
+                                  : <span style={{ color: DS.colors.danger }}>↓ {Math.abs(d.change)}%</span>
+                              }
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Selected period highlight */}
+                  {analyticsSelected && (
+                    <div className="chart-card" style={{ borderColor: DS.colors.purple }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                        <div className="chart-title" style={{ marginBottom: 0 }}>{analyticsSelected.label} — Snapshot</div>
+                        <button className="btn-sm btn-outline" onClick={() => setAnalyticsSelected(null)}>✕</button>
+                      </div>
+                      <div className="stats-row">
+                        <div className="stat-card"><div className="stat-label">Revenue</div><div className="stat-value" style={{ fontSize: 20 }}>{fmt(penceToGBP(analyticsSelected.revenue))}</div></div>
+                        <div className="stat-card"><div className="stat-label">Orders</div><div className="stat-value" style={{ fontSize: 20 }}>{analyticsSelected.orders}</div></div>
+                        <div className="stat-card"><div className="stat-label">Avg Order</div><div className="stat-value" style={{ fontSize: 20 }}>{analyticsSelected.orders > 0 ? fmt(penceToGBP(analyticsSelected.revenue / analyticsSelected.orders)) : "—"}</div></div>
+                        <div className="stat-card">
+                          <div className="stat-label">vs Previous {analyticsView === "weekly" ? "Week" : "Month"}</div>
+                          <div className="stat-value" style={{ fontSize: 20, color: analyticsSelected.change === null ? DS.colors.textMuted : analyticsSelected.change >= 0 ? DS.colors.accent : DS.colors.danger }}>
+                            {analyticsSelected.change === null ? "—" : `${analyticsSelected.change >= 0 ? "↑" : "↓"} ${Math.abs(analyticsSelected.change)}%`}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           </>
         )}
 
