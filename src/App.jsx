@@ -1586,7 +1586,9 @@ export default function App() {
     setUser(loggedInUser);
     setShowLogin(false);
     // Auto-navigate to correct dashboard based on role
-    if (loggedInUser.role === "manager" || loggedInUser.role === "admin") {
+    if (loggedInUser.role === "admin") {
+      setActiveTab("admin");
+    } else if (loggedInUser.role === "manager") {
       setActiveTab("manager");
     } else {
       setActiveTab("staff");
@@ -1605,14 +1607,15 @@ export default function App() {
 
   // Tab visibility based on role
   const isStaff = user?.role === "staff";
-  const isManager = user?.role === "manager" || user?.role === "admin";
+  const isManager = user?.role === "manager";
+  const isAdmin = user?.role === "admin";
 
   const tabs = [
-    { id: "kiosk",   label: "🖥 Customer Kiosk", public: true },
-    { id: "staff",   label: "👤 Staff Dashboard", public: false },
-    { id: "manager", label: "📊 Venue Manager", public: false },
-    { id: "admin",   label: "⚙️ Platform Admin", public: false },
-  ].filter(t => t.public || user);
+    { id: "kiosk",   label: "🖥 Customer Kiosk", show: true },
+    { id: "staff",   label: "👤 Staff Dashboard", show: !!user },
+    { id: "manager", label: "📊 Venue Manager", show: isManager || isAdmin },
+    { id: "admin",   label: "⚙️ Platform Admin", show: isAdmin },
+  ].filter(t => t.show);
 
   return (
     <>
@@ -1635,7 +1638,7 @@ export default function App() {
             {user ? (
               <>
                 <div className="auth-role-badge">
-                  {user.role === "manager" || user.role === "admin" ? "📊" : "👤"} {user.role.charAt(0).toUpperCase() + user.role.slice(1)}
+                  {user.role === "admin" ? "⚙️" : user.role === "manager" ? "📊" : "👤"} {user.role.charAt(0).toUpperCase() + user.role.slice(1)}
                 </div>
                 <span style={{ fontSize: 12, color: DS.colors.textSub }}>{user.email}</span>
                 <button className="logout-btn" onClick={handleLogout}>Sign Out</button>
@@ -1651,13 +1654,20 @@ export default function App() {
         <div className="main-content">
           {activeTab === "kiosk" && <KioskView />}
           {activeTab === "staff" && (user ? <StaffView /> : <LoginScreen onLogin={handleLogin} />)}
-          {activeTab === "manager" && (isManager ? <ManagerView /> : user && isStaff ? (
+          {activeTab === "manager" && ((isManager || isAdmin) ? <ManagerView /> : (
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", flexDirection: "column", gap: 16, color: DS.colors.textMuted }}>
               <div style={{ fontSize: 48 }}>🔒</div>
               <div style={{ fontSize: 18, fontWeight: 600 }}>Manager access required</div>
+              <div style={{ fontSize: 13 }}>Please log in with a manager account</div>
             </div>
-          ) : <LoginScreen onLogin={handleLogin} />)}
-          {activeTab === "admin" && (isManager ? <AdminView /> : <LoginScreen onLogin={handleLogin} />)}
+          ))}
+          {activeTab === "admin" && (isAdmin ? <AdminView /> : (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", flexDirection: "column", gap: 16, color: DS.colors.textMuted }}>
+              <div style={{ fontSize: 48 }}>🔒</div>
+              <div style={{ fontSize: 18, fontWeight: 600 }}>Admin access required</div>
+              <div style={{ fontSize: 13 }}>Please log in with a platform admin account</div>
+            </div>
+          ))}
         </div>
       </div>
     </>
