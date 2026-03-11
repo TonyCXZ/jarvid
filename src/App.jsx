@@ -2174,17 +2174,27 @@ export default function App() {
   const [kioskPin, setKioskPin] = useState(null);
   const [kioskVenueId, setKioskVenueId] = useState(null);
 
-  // Load kiosk PIN for this device — check URL param ?venue=<id> or fall back to first venue
+  // Load kiosk PIN — falls back to "1234" on any error
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const venueParam = params.get("venue");
-    const query = venueParam
-      ? supabase.from("venues").select("id, kiosk_pin").eq("id", venueParam).single()
-      : supabase.from("venues").select("id, kiosk_pin").order("name").limit(1).single();
-    query.then(({ data }) => {
-      if (data) { setKioskPin(data.kiosk_pin || "1234"); setKioskVenueId(data.id); }
-      else setKioskPin("1234");
-    });
+    const loadPin = async () => {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const venueParam = params.get("venue");
+        const query = venueParam
+          ? supabase.from("venues").select("id, kiosk_pin").eq("id", venueParam).single()
+          : supabase.from("venues").select("id, kiosk_pin").order("name").limit(1).single();
+        const { data, error } = await query;
+        if (!error && data) {
+          setKioskPin(data.kiosk_pin || "1234");
+          setKioskVenueId(data.id);
+        } else {
+          setKioskPin("1234");
+        }
+      } catch {
+        setKioskPin("1234");
+      }
+    };
+    loadPin();
   }, []);
 
   // Check for existing session on mount
@@ -2248,7 +2258,7 @@ export default function App() {
     const next = pinEntry + key;
     setPinEntry(next);
     if (next.length === 4) {
-      if (kioskPin && next === kioskPin) {
+      if (next === (kioskPin || "1234")) {
         setShowPinOverlay(false);
         setKioskLocked(false);
         setPinEntry("");
