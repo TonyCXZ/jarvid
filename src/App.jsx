@@ -100,7 +100,7 @@ const GlobalStyles = () => (
     .btn-primary:hover { transform: scale(1.02); box-shadow: 0 0 60px rgba(0,245,196,0.6); }
     .btn-primary:active { transform: scale(0.99); }
     .browse-layout { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
-    .browse-header { padding: 16px 20px 0; display: flex; align-items: center; gap: 16px; flex-shrink: 0; }
+    .browse-header { padding: 64px 20px 0; display: flex; align-items: center; gap: 16px; flex-shrink: 0; }
     .browse-title { font-family: ${DS.font.display}; font-size: 28px; font-weight: 800; letter-spacing: 0.05em; color: ${DS.colors.white}; flex: 1; }
     .cart-btn { display: flex; align-items: center; gap: 10px; padding: 12px 20px; border-radius: 10px; background: ${DS.colors.accentGlow}; border: 1px solid ${DS.colors.accent}; color: ${DS.colors.accent}; font-size: 16px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
     .cart-btn:hover { background: rgba(0,245,196,0.25); }
