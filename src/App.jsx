@@ -925,12 +925,65 @@ function KioskView({ venueId: propVenueId }) {
   const [timeoutCountdown, setTimeoutCountdown] = useState(30);
   const inactivityTimer = useRef(null);
   const countdownTimer = useRef(null);
+  const heartbeatTimer = useRef(null);
+  const [kioskDbId, setKioskDbId] = useState(null);
 
   const INACTIVITY_SECONDS = 90;
   const WARNING_SECONDS = 30;
 
   const venueId = propVenueId || null;
-  const kioskId = null;
+  const kioskId = kioskDbId;
+
+  // Generate a stable device_id from venueId + browser, stored in localStorage
+  const getDeviceId = () => {
+    const key = `jarvid_device_id_${venueId || "default"}`;
+    let id = localStorage.getItem(key);
+    if (!id) {
+      id = `kiosk_${(venueId || "demo").slice(0, 8)}_${Math.random().toString(36).substr(2, 8)}`;
+      localStorage.setItem(key, id);
+    }
+    return id;
+  };
+
+  const sendHeartbeat = async (dbId, devId) => {
+    if (!venueId) return;
+    await supabase.from("kiosks").upsert({
+      id: dbId,
+      device_id: devId,
+      venue_id: venueId,
+      name: `Kiosk · ${venueId.slice(0, 8)}`,
+      status: "online",
+      last_heartbeat: new Date().toISOString(),
+      app_version: "1.0.0",
+    }, { onConflict: "device_id" });
+  };
+
+  // Register kiosk and start heartbeat on mount
+  useEffect(() => {
+    if (!venueId) return;
+    const devId = getDeviceId();
+
+    const register = async () => {
+      // Check if this device already has a row
+      const { data } = await supabase.from("kiosks").select("id").eq("device_id", devId).single();
+      const id = data?.id || crypto.randomUUID();
+      setKioskDbId(id);
+      await sendHeartbeat(id, devId);
+      // Heartbeat every 60 seconds
+      heartbeatTimer.current = setInterval(() => sendHeartbeat(id, devId), 60000);
+    };
+
+    register();
+
+    // Mark offline on unmount
+    return () => {
+      clearInterval(heartbeatTimer.current);
+      if (venueId) {
+        const devId = getDeviceId();
+        supabase.from("kiosks").update({ status: "offline" }).eq("device_id", devId);
+      }
+    };
+  }, [venueId]);
 
   const goHome = () => {
     setCart({});
@@ -1290,6 +1343,7 @@ function ManagerView({ user }) {
   const [dayDetail, setDayDetail] = useState(null);
   const [loadingDayDetail, setLoadingDayDetail] = useState(false);
   const [analyticsView, setAnalyticsView] = useState("weekly");
+  const [kioskStatuses, setKioskStatuses] = useState([]);
   const [analyticsData, setAnalyticsData] = useState([]);
   const [loadingAnalytics, setLoadingAnalytics] = useState(false);
   const [analyticsSelected, setAnalyticsSelected] = useState(null);
@@ -1330,6 +1384,7 @@ function ManagerView({ user }) {
   useEffect(() => {
     if (!VENUE_ID) return;
     loadOverview();
+    loadKiosks().then(setKioskStatuses);
     loadWeeklySales();
     loadTopProducts();
   }, [VENUE_ID]);
@@ -1345,6 +1400,21 @@ function ManagerView({ user }) {
         .then(({ data }) => { if (data) { setCurrentPin(data.kiosk_pin || ""); setPinEdit(data.kiosk_pin || ""); } });
     }
   }, [activeSection, VENUE_ID]);
+
+  const loadKiosks = async () => {
+    const { data } = await supabase
+      .from("kiosks")
+      .select("id, name, status, last_heartbeat, app_version, device_id")
+      .eq("venue_id", VENUE_ID);
+    if (data) {
+      const now = new Date();
+      return data.map(k => ({
+        ...k,
+        isOnline: k.last_heartbeat && (now - new Date(k.last_heartbeat)) < 120000,
+      }));
+    }
+    return [];
+  };
 
   const loadOverview = async () => {
     setLoadingOverview(true);
@@ -2260,6 +2330,110 @@ function ManagerView({ user }) {
 }
 
 // ============================================================
+// DEVICE MONITOR COMPONENT
+// ============================================================
+function DeviceMonitor({ venues }) {
+  const [devices, setDevices] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const refreshTimer = useRef(null);
+
+  const loadDevices = async () => {
+    const { data } = await supabase
+      .from("kiosks")
+      .select("id, name, device_id, venue_id, status, last_heartbeat, app_version, venues(name)")
+      .order("venue_id");
+    if (data) {
+      const now = new Date();
+      setDevices(data.map(k => ({
+        ...k,
+        venueName: k.venues?.name || "Unknown Venue",
+        isOnline: k.last_heartbeat && (now - new Date(k.last_heartbeat)) < 120000,
+        lastSeen: k.last_heartbeat ? new Date(k.last_heartbeat) : null,
+      })));
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    loadDevices();
+    // Refresh every 30 seconds so status stays current
+    refreshTimer.current = setInterval(loadDevices, 30000);
+    return () => clearInterval(refreshTimer.current);
+  }, []);
+
+  const timeSince = (date) => {
+    if (!date) return "Never";
+    const secs = Math.floor((new Date() - date) / 1000);
+    if (secs < 60) return `${secs}s ago`;
+    if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
+    return `${Math.floor(secs / 3600)}h ago`;
+  };
+
+  return (
+    <>
+      <div>
+        <div className="section-title">DEVICE MONITORING</div>
+        <div className="section-sub">Live kiosk status — updates every 30 seconds</div>
+      </div>
+      <div className="stats-row">
+        <div className="stat-card">
+          <div className="stat-label">Total Devices</div>
+          <div className="stat-value">{devices.length}</div>
+          <div className="stat-sub">Registered kiosks</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Online</div>
+          <div className="stat-value" style={{ color: DS.colors.accent }}>{devices.filter(d => d.isOnline).length}</div>
+          <div className="stat-sub">Last heartbeat &lt;2 min</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Offline</div>
+          <div className="stat-value" style={{ color: devices.filter(d => !d.isOnline).length > 0 ? DS.colors.danger : DS.colors.textMuted }}>
+            {devices.filter(d => !d.isOnline).length}
+          </div>
+          <div className="stat-sub">No recent heartbeat</div>
+        </div>
+      </div>
+      <div className="chart-card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {loading && <div style={{ color: DS.colors.textMuted, fontSize: 13 }}>Loading devices…</div>}
+        {!loading && devices.length === 0 && (
+          <div style={{ color: DS.colors.textMuted, fontSize: 13, textAlign: "center", padding: 32 }}>
+            No devices registered yet. Devices appear here automatically once a kiosk loads for the first time.
+          </div>
+        )}
+        {devices.map(d => (
+          <div key={d.id} className="device-row">
+            <div style={{ flex: 1 }}>
+              <div className="device-name">{d.name || d.device_id}</div>
+              <div style={{ fontSize: 12, color: DS.colors.textMuted }}>{d.venueName}</div>
+            </div>
+            <div className="device-status" style={{ gap: 16 }}>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: 12, color: DS.colors.textMuted }}>Last seen</div>
+                <div style={{ fontSize: 13, color: d.isOnline ? DS.colors.accent : DS.colors.textSub }}>
+                  {timeSince(d.lastSeen)}
+                </div>
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: 12, color: DS.colors.textMuted }}>Version</div>
+                <div style={{ fontSize: 13, color: DS.colors.textSub }}>{d.app_version || "—"}</div>
+              </div>
+              <span className="tag-pill" style={{
+                background: d.isOnline ? DS.colors.accentGlow : DS.colors.dangerGlow,
+                color: d.isOnline ? DS.colors.accent : DS.colors.danger,
+                minWidth: 64, textAlign: "center",
+              }}>
+                {d.isOnline ? "● online" : "● offline"}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+// ============================================================
 // ADMIN VIEW (mostly static for now)
 // ============================================================
 function AdminView() {
@@ -2371,39 +2545,7 @@ function AdminView() {
         )}
 
         {adminSection === "devices" && (
-          <>
-            <div>
-              <div className="section-title">DEVICE MONITORING</div>
-              <div className="section-sub">Remote kiosk management</div>
-            </div>
-            <div className="chart-card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {[
-                { id: "K-001", name: "Kiosk 1", venue: "The Crown Pub", uptime: "99.9%", version: "v2.4.1", status: "online" },
-                { id: "K-002", name: "Kiosk 2", venue: "The Crown Pub", uptime: "99.7%", version: "v2.4.1", status: "online" },
-                { id: "K-003", name: "Kiosk 1", venue: "Vape HQ Shop", uptime: "100%", version: "v2.4.0", status: "online" },
-                { id: "K-004", name: "Kiosk 2", venue: "Vape HQ Shop", uptime: "98.2%", version: "v2.3.9", status: "needs_update" },
-                { id: "K-005", name: "Kiosk 1", venue: "The Fox & Hound", uptime: "—", version: "v2.4.1", status: "offline" },
-              ].map(d => (
-                <div key={d.id} className="device-row">
-                  <div>
-                    <div className="device-name">{d.id} — {d.name}</div>
-                    <div style={{ fontSize: 12, color: DS.colors.textMuted }}>{d.venue}</div>
-                  </div>
-                  <div className="device-status">
-                    <span>⬆ {d.uptime}</span>
-                    <span className="tag-pill" style={{
-                      background: d.status === "online" ? DS.colors.accentGlow : d.status === "needs_update" ? DS.colors.warnGlow : DS.colors.dangerGlow,
-                      color: d.status === "online" ? DS.colors.accent : d.status === "needs_update" ? DS.colors.warn : DS.colors.danger,
-                    }}>{d.status === "needs_update" ? "⚠ Update" : d.status}</span>
-                  </div>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    {d.status === "needs_update" && <button className="btn-sm btn-accent">Update</button>}
-                    <button className="btn-danger-sm">Shutdown</button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </>
+          <DeviceMonitor venues={venues} />
         )}
 
         {adminSection === "billing" && (
