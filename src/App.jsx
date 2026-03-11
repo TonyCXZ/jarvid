@@ -116,10 +116,10 @@ const GlobalStyles = () => (
     .product-card.out-of-stock { opacity: 0.45; border-color: ${DS.colors.border}; pointer-events: none; }
     .product-card.out-of-stock:hover { transform: none; background: ${DS.colors.card}; border-color: ${DS.colors.border}; }
     .out-of-stock-badge { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.75); color: ${DS.colors.textMuted}; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; padding: 3px 8px; border-radius: 4px; text-transform: uppercase; }
-    .kiosk-nav { display: flex; align-items: center; justify-content: space-between; padding: 10px 20px; background: ${DS.colors.surface}; border-bottom: 1px solid ${DS.colors.border}; flex-shrink: 0; }
-    .kiosk-nav-btn { display: flex; align-items: center; gap: 6px; background: transparent; border: 1px solid ${DS.colors.border}; border-radius: 8px; color: ${DS.colors.textSub}; font-size: 13px; padding: 7px 14px; cursor: pointer; transition: all 0.15s; font-family: ${DS.font.body}; }
-    .kiosk-nav-btn:hover { border-color: ${DS.colors.accent}; color: ${DS.colors.accent}; }
-    .kiosk-nav-title { font-family: ${DS.font.display}; font-size: 13px; font-weight: 700; color: ${DS.colors.textMuted}; letter-spacing: 0.1em; text-transform: uppercase; }
+    .kiosk-nav-btn { display: flex; align-items: center; gap: 6px; background: rgba(10,10,20,0.75); backdrop-filter: blur(8px); border: 1px solid ${DS.colors.border}; border-radius: 10px; color: ${DS.colors.textSub}; font-size: 14px; padding: 10px 18px; cursor: pointer; transition: all 0.15s; font-family: ${DS.font.body}; position: absolute; top: 16px; z-index: 10; }
+    .kiosk-nav-btn:hover { border-color: ${DS.colors.accent}; color: ${DS.colors.accent}; background: rgba(0,245,196,0.08); }
+    .kiosk-nav-btn.back { left: 16px; }
+    .kiosk-nav-btn.home { right: 16px; }
     .popular-badge { position: absolute; top: 10px; right: 10px; padding: 2px 8px; border-radius: 4px; background: ${DS.colors.accent}; color: ${DS.colors.bg}; font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
     .product-image { width: 100%; height: 120px; object-fit: contain; border-radius: 8px; background: rgba(255,255,255,0.04); display: block; }
     .product-image-wrap { width: 100%; height: 120px; border-radius: 8px; background: rgba(255,255,255,0.04); display: flex; align-items: center; justify-content: center; overflow: hidden; }
@@ -369,15 +369,16 @@ function ProductImage({ imageUrl, name, size = "card" }) {
 // ============================================================
 // KIOSK — WELCOME
 // ============================================================
-function KioskNav({ onBack, onHome, title, showBack = true }) {
+function KioskNav({ onBack, onHome, showBack = true }) {
   return (
-    <div className="kiosk-nav">
-      {showBack && onBack ? (
-        <button className="kiosk-nav-btn" onClick={onBack}>← Back</button>
-      ) : <div style={{ width: 80 }} />}
-      {title && <div className="kiosk-nav-title">{title}</div>}
-      <button className="kiosk-nav-btn" onClick={onHome}>⌂ Home</button>
-    </div>
+    <>
+      {showBack && onBack && (
+        <button className="kiosk-nav-btn back" onClick={onBack}>← Back</button>
+      )}
+      {onHome && (
+        <button className="kiosk-nav-btn home" onClick={onHome}>⌂ Home</button>
+      )}
+    </>
   );
 }
 
@@ -461,7 +462,7 @@ function KioskBrowse({ cart, onAddToCart, onRemoveFromCart, onCheckout, venueId,
 
   return (
     <div className="browse-layout" style={{ position: "relative" }}>
-      <KioskNav onHome={onHome} title="Browse Products" showBack={false} />
+      <KioskNav onHome={onHome} showBack={false} />
       <div className="browse-header">
         <div className="browse-title">CHOOSE YOUR PRODUCTS</div>
         {totalItems > 0 && (
@@ -627,9 +628,12 @@ function KioskAgeVerify({ onVerified, onBack, onHome, kioskId }) {
     }, 4000);
   };
 
+  const navButtons = <KioskNav onBack={phase === "choose" ? onBack : undefined} onHome={onHome} showBack={phase === "choose"} />;
+
   if (phase === "success") {
     return (
-      <div className="age-verify-screen">
+      <div className="age-verify-screen" style={{ position: "relative" }}>
+        {navButtons}
         <div style={{ fontSize: 80 }}>✅</div>
         <div className="age-heading" style={{ color: DS.colors.accent }}>AGE VERIFIED</div>
         <div className="age-sub">Your identity has been confirmed via <strong style={{ color: DS.colors.white }}>{method}</strong>. Proceeding to payment.</div>
@@ -640,7 +644,8 @@ function KioskAgeVerify({ onVerified, onBack, onHome, kioskId }) {
 
   if (phase === "manual_wait") {
     return (
-      <div className="age-verify-screen">
+      <div className="age-verify-screen" style={{ position: "relative" }}>
+        {navButtons}
         <div style={{ fontSize: 60 }}>👤</div>
         <div className="age-heading">STAFF VERIFICATION</div>
         <div className="age-sub">A staff member will verify your age shortly. Please wait…</div>
@@ -655,7 +660,8 @@ function KioskAgeVerify({ onVerified, onBack, onHome, kioskId }) {
 
   if (phase === "scanning") {
     return (
-      <div className="age-verify-screen">
+      <div className="age-verify-screen" style={{ position: "relative" }}>
+        {navButtons}
         <div className="age-heading">SCANNING {method?.toUpperCase()}</div>
         <div className="scanning-animation">
           <div className="scan-line" />
@@ -668,7 +674,8 @@ function KioskAgeVerify({ onVerified, onBack, onHome, kioskId }) {
   }
 
   return (
-    <div className="age-verify-screen">
+    <div className="age-verify-screen" style={{ position: "relative" }}>
+      {navButtons}
       <div className="age-heading">VERIFY YOUR AGE</div>
       <div className="age-sub">You must be 18+ to purchase. Choose a verification method below.</div>
       <div className="verify-options">
@@ -690,7 +697,6 @@ function KioskAgeVerify({ onVerified, onBack, onHome, kioskId }) {
           <div className="verify-desc">Ask staff to verify</div>
         </div>
       </div>
-
     </div>
   );
 }
@@ -789,15 +795,11 @@ function KioskPayment({ cart, products, onPaid, onBack, onHome, verificationId, 
   };
 
   return (
-    <div className="payment-screen">
-      <KioskNav onBack={onBack} onHome={onHome} title="Payment" showBack={phase === "waiting"} />
+    <div className="payment-screen" style={{ position: "relative" }}>
+      <KioskNav onBack={phase === "waiting" ? onBack : undefined} onHome={phase !== "done" ? onHome : undefined} showBack={phase === "waiting"} />
       {error && (
-        <div className="error-banner" style={{ margin: "0 20px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-          <span>{error}</span>
-          <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-            <button className="kiosk-nav-btn" onClick={onBack} style={{ fontSize: 12, padding: "5px 10px" }}>← Edit Cart</button>
-            <button className="kiosk-nav-btn" onClick={onHome} style={{ fontSize: 12, padding: "5px 10px" }}>⌂ Start Over</button>
-          </div>
+        <div className="error-banner" style={{ margin: "0 20px 16px" }}>
+          {error}
         </div>
       )}
       <div className="payment-heading">
