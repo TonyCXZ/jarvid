@@ -2518,7 +2518,7 @@ export default function App() {
   const isAdmin = user?.role === "admin";
 
   const tabs = [
-    { id: "kiosk",   label: "🖥 Customer Kiosk", show: true },
+    { id: "kiosk",   label: "🖥 Customer Kiosk", show: !isStaffMode },
     { id: "staff",   label: "👤 Staff Dashboard", show: !!user && !kioskLocked },
     { id: "manager", label: "📊 Venue Manager", show: (isManager || isOrgAdmin || isAdmin) && !kioskLocked },
     { id: "admin",   label: "⚙️ Platform Admin", show: isAdmin && !kioskLocked },
