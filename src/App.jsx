@@ -851,15 +851,15 @@ function KioskProgress({ step }) {
 // ============================================================
 // KIOSK VIEW
 // ============================================================
-function KioskView() {
+function KioskView({ venueId: propVenueId }) {
   const [screen, setScreen] = useState("welcome");
   const [cart, setCart] = useState({});
   const [products, setProducts] = useState([]);
   const [verificationId, setVerificationId] = useState(null);
   const [placedOrderId, setPlacedOrderId] = useState(null);
 
-  // Using null venueId for now (loads all products); replace with real venue UUID once auth is added
-  const venueId = null;
+  // Use venue from URL param passed down from App root
+  const venueId = propVenueId || null;
   const kioskId = null;
 
   const addToCart = (id) => setCart(c => ({ ...c, [id]: (c[id] || 0) + 1 }));
@@ -2182,7 +2182,7 @@ export default function App() {
         const venueParam = params.get("venue");
         const query = venueParam
           ? supabase.from("venues").select("id, kiosk_pin").eq("id", venueParam).single()
-          : supabase.from("venues").select("id, kiosk_pin").order("name").limit(1).single();
+          : supabase.from("venues").select("id, kiosk_pin").eq("id", "498c51cc-46b2-41e3-84ab-1a6d48030afb").single();
         const { data, error } = await query;
         if (!error && data) {
           setKioskPin(data.kiosk_pin || "1234");
@@ -2370,7 +2370,7 @@ export default function App() {
           </div>
         </nav>
         <div className="main-content">
-          {activeTab === "kiosk" && <KioskView />}
+          {activeTab === "kiosk" && <KioskView venueId={kioskVenueId} />}
           {activeTab === "staff" && (user ? <StaffView user={user} /> : <LoginScreen onLogin={handleLogin} />)}
           {activeTab === "manager" && ((isManager || isOrgAdmin || isAdmin) ? <ManagerView user={user} /> : (
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", flexDirection: "column", gap: 16, color: DS.colors.textMuted }}>
