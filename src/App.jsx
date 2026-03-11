@@ -286,6 +286,24 @@ const GlobalStyles = () => (
     .stock-bar-bg { flex: 1; height: 4px; border-radius: 2px; background: ${DS.colors.border}; }
     .stock-bar-fill { height: 4px; border-radius: 2px; transition: width 0.3s; }
     .tag-pill { display: inline-flex; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; }
+    .auth-screen { width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; background: radial-gradient(ellipse 80% 60% at 50% 40%, rgba(0,245,196,0.06) 0%, transparent 70%); }
+    .auth-card { width: 420px; padding: 48px 40px; background: #12121a; border: 1px solid #2a2a3e; border-radius: 20px; display: flex; flex-direction: column; gap: 28px; }
+    .auth-logo { font-family: 'Barlow Condensed', sans-serif; font-weight: 900; font-size: 48px; letter-spacing: 0.08em; color: white; text-align: center; }
+    .auth-logo span { color: #00f5c4; text-shadow: 0 0 30px #00f5c4; }
+    .auth-subtitle { font-size: 14px; color: #8888aa; text-align: center; margin-top: -20px; letter-spacing: 0.04em; }
+    .auth-form { display: flex; flex-direction: column; gap: 16px; }
+    .auth-label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: #8888aa; font-weight: 600; margin-bottom: 4px; }
+    .auth-input { width: 100%; padding: 14px 16px; border-radius: 10px; background: #1a1a26; border: 1px solid #2a2a3e; color: #e8e8f0; font-size: 15px; outline: none; font-family: 'DM Sans', sans-serif; transition: border-color 0.15s; }
+    .auth-input:focus { border-color: #00f5c4; }
+    .auth-input::placeholder { color: #555570; }
+    .auth-btn { width: 100%; padding: 16px; border-radius: 10px; background: #00f5c4; color: #0a0a0f; font-family: 'Barlow Condensed', sans-serif; font-size: 20px; font-weight: 700; letter-spacing: 0.08em; border: none; cursor: pointer; transition: all 0.2s; text-transform: uppercase; }
+    .auth-btn:hover { background: #00c49a; }
+    .auth-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .auth-error { padding: 12px 16px; border-radius: 8px; background: rgba(255,71,87,0.1); border: 1px solid #ff4757; color: #ff4757; font-size: 13px; text-align: center; }
+    .auth-role-badge { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 10px; border-radius: 8px; background: rgba(0,245,196,0.1); border: 1px solid rgba(0,245,196,0.3); font-size: 13px; color: #00f5c4; font-weight: 600; }
+    .logout-btn { padding: 6px 14px; border-radius: 6px; background: transparent; border: 1px solid #2a2a3e; color: #8888aa; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+    .logout-btn:hover { border-color: #ff4757; color: #ff4757; }
+
     .spinner { width: 40px; height: 40px; border: 3px solid ${DS.colors.border}; border-top-color: ${DS.colors.accent}; border-radius: 50%; animation: spin 0.8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .error-banner { padding: 12px 16px; border-radius: 8px; background: ${DS.colors.dangerGlow}; border: 1px solid ${DS.colors.danger}; color: ${DS.colors.danger}; font-size: 13px; margin-bottom: 16px; }
@@ -1450,9 +1468,97 @@ function AdminView() {
 // ============================================================
 // APP ROOT
 // ============================================================
+
+// ============================================================
+// LOGIN SCREEN
+// ============================================================
+function LoginScreen({ onLogin }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+    try {
+      const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password });
+      if (authError) throw authError;
+
+      // Fetch role from staff_users table
+      const { data: staffData, error: staffError } = await supabase
+        .from("staff_users")
+        .select("role, venue_id")
+        .eq("email", email)
+        .eq("is_active", true)
+        .single();
+
+      if (staffError || !staffData) throw new Error("No staff account found for this email.");
+      onLogin({ ...data.user, role: staffData.role, venue_id: staffData.venue_id });
+    } catch (e) {
+      setError(e.message || "Login failed. Please check your credentials.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="auth-screen">
+      <div className="auth-card">
+        <div>
+          <div className="auth-logo">J<span>arv</span>ID</div>
+          <div className="auth-subtitle">STAFF & MANAGER PORTAL</div>
+        </div>
+        <form className="auth-form" onSubmit={handleLogin}>
+          <div>
+            <div className="auth-label">Email</div>
+            <input className="auth-input" type="email" placeholder="you@venue.com" value={email} onChange={e => setEmail(e.target.value)} required autoComplete="email" />
+          </div>
+          <div>
+            <div className="auth-label">Password</div>
+            <input className="auth-input" type="password" placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} required autoComplete="current-password" />
+          </div>
+          {error && <div className="auth-error">{error}</div>}
+          <button className="auth-btn" type="submit" disabled={loading}>
+            {loading ? "Signing in…" : "Sign In"}
+          </button>
+        </form>
+        <div style={{ fontSize: 12, color: "#555570", textAlign: "center" }}>
+          This portal is for authorised staff only.<br />Customer kiosk does not require login.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState("kiosk");
   const [pendingCount, setPendingCount] = useState(0);
+  const [user, setUser] = useState(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [showLogin, setShowLogin] = useState(false);
+
+  // Check for existing session on mount
+  useEffect(() => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (session?.user) {
+        const { data: staffData } = await supabase
+          .from("staff_users")
+          .select("role, venue_id")
+          .eq("email", session.user.email)
+          .eq("is_active", true)
+          .single();
+        if (staffData) setUser({ ...session.user, role: staffData.role, venue_id: staffData.venue_id });
+      }
+      setAuthChecked(true);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!session) { setUser(null); setActiveTab("kiosk"); }
+    });
+    return () => subscription.unsubscribe();
+  }, []);
 
   // Keep pending badge count in sync
   useEffect(() => {
@@ -1467,7 +1573,6 @@ export default function App() {
       })
       .subscribe();
 
-    // Initial count
     supabase
       .from("orders")
       .select("*", { count: "exact", head: true })
@@ -1477,12 +1582,37 @@ export default function App() {
     return () => supabase.removeChannel(channel);
   }, []);
 
+  const handleLogin = (loggedInUser) => {
+    setUser(loggedInUser);
+    setShowLogin(false);
+    // Auto-navigate to correct dashboard based on role
+    if (loggedInUser.role === "manager" || loggedInUser.role === "admin") {
+      setActiveTab("manager");
+    } else {
+      setActiveTab("staff");
+    }
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setUser(null);
+    setActiveTab("kiosk");
+  };
+
+  if (!authChecked) return <><GlobalStyles /><div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "#0a0a0f" }}><div className="spinner" /></div></>;
+
+  if (showLogin) return <><GlobalStyles /><LoginScreen onLogin={handleLogin} /></>;
+
+  // Tab visibility based on role
+  const isStaff = user?.role === "staff";
+  const isManager = user?.role === "manager" || user?.role === "admin";
+
   const tabs = [
-    { id: "kiosk",   label: "🖥 Customer Kiosk" },
-    { id: "staff",   label: "👤 Staff Dashboard" },
-    { id: "manager", label: "📊 Venue Manager" },
-    { id: "admin",   label: "⚙️ Platform Admin" },
-  ];
+    { id: "kiosk",   label: "🖥 Customer Kiosk", public: true },
+    { id: "staff",   label: "👤 Staff Dashboard", public: false },
+    { id: "manager", label: "📊 Venue Manager", public: false },
+    { id: "admin",   label: "⚙️ Platform Admin", public: false },
+  ].filter(t => t.public || user);
 
   return (
     <>
@@ -1492,22 +1622,42 @@ export default function App() {
           <div className="nav-logo">J<span>arv</span>ID</div>
           <div className="nav-tabs">
             {tabs.map(t => (
-              <button key={t.id} className={`nav-tab ${activeTab === t.id ? "active" : ""}`} onClick={() => setActiveTab(t.id)}>
+              <button key={t.id} className={`nav-tab ${activeTab === t.id ? "active" : ""}`} onClick={() => {
+                if (!t.public && !user) { setShowLogin(true); return; }
+                setActiveTab(t.id);
+              }}>
                 {t.label}
                 {t.id === "staff" && pendingCount > 0 && <span className="badge" style={{ marginLeft: 6 }}>{pendingCount}</span>}
               </button>
             ))}
           </div>
           <div className="nav-right">
-            <span style={{ fontSize: 12, color: DS.colors.textMuted }}>MVP v1.0</span>
+            {user ? (
+              <>
+                <div className="auth-role-badge">
+                  {user.role === "manager" || user.role === "admin" ? "📊" : "👤"} {user.role.charAt(0).toUpperCase() + user.role.slice(1)}
+                </div>
+                <span style={{ fontSize: 12, color: DS.colors.textSub }}>{user.email}</span>
+                <button className="logout-btn" onClick={handleLogout}>Sign Out</button>
+              </>
+            ) : (
+              <button className="logout-btn" style={{ borderColor: DS.colors.accent, color: DS.colors.accent }} onClick={() => setShowLogin(true)}>
+                Staff Login
+              </button>
+            )}
             <span style={{ fontSize: 12, color: DS.colors.accent }}>● Live</span>
           </div>
         </nav>
         <div className="main-content">
-          {activeTab === "kiosk"   && <KioskView />}
-          {activeTab === "staff"   && <StaffView />}
-          {activeTab === "manager" && <ManagerView />}
-          {activeTab === "admin"   && <AdminView />}
+          {activeTab === "kiosk" && <KioskView />}
+          {activeTab === "staff" && (user ? <StaffView /> : <LoginScreen onLogin={handleLogin} />)}
+          {activeTab === "manager" && (isManager ? <ManagerView /> : user && isStaff ? (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", flexDirection: "column", gap: 16, color: DS.colors.textMuted }}>
+              <div style={{ fontSize: 48 }}>🔒</div>
+              <div style={{ fontSize: 18, fontWeight: 600 }}>Manager access required</div>
+            </div>
+          ) : <LoginScreen onLogin={handleLogin} />)}
+          {activeTab === "admin" && (isManager ? <AdminView /> : <LoginScreen onLogin={handleLogin} />)}
         </div>
       </div>
     </>
