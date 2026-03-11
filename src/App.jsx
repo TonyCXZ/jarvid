@@ -889,15 +889,23 @@ function KioskView() {
 // ============================================================
 // STAFF VIEW — live orders from Supabase with realtime
 // ============================================================
-function StaffView() {
+function StaffView({ user }) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all");
   const [error, setError] = useState(null);
+  const [venueName, setVenueName] = useState("");
+
+  useEffect(() => {
+    if (user?.venue_id) {
+      supabase.from("venues").select("name").eq("id", user.venue_id).single()
+        .then(({ data }) => { if (data) setVenueName(data.name); });
+    }
+  }, [user?.venue_id]);
 
   const loadOrders = useCallback(async () => {
     try {
-      const { data, error: err } = await supabase
+      let query = supabase
         .from("orders")
         .select(`
           *,
@@ -911,6 +919,10 @@ function StaffView() {
         .order("created_at", { ascending: false })
         .limit(50);
 
+      // Filter by venue for staff and managers
+      if (user?.venue_id) query = query.eq("venue_id", user.venue_id);
+
+      const { data, error: err } = await query;
       if (err) throw err;
       setOrders(data || []);
     } catch (e) {
@@ -919,12 +931,11 @@ function StaffView() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [user?.venue_id]);
 
   useEffect(() => {
     loadOrders();
 
-    // Realtime subscription — auto-refresh when orders change
     const channel = supabase
       .channel("orders-channel")
       .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, () => {
@@ -1049,7 +1060,7 @@ function StaffView() {
 // ============================================================
 // MANAGER VIEW — loads products from Supabase
 // ============================================================
-function ManagerView() {
+function ManagerView({ user }) {
   const [activeSection, setActiveSection] = useState("overview");
   const [searchQ, setSearchQ] = useState("");
   const [products, setProducts] = useState([]);
@@ -1061,19 +1072,43 @@ function ManagerView() {
   const [complianceStats, setComplianceStats] = useState(null);
   const [complianceLog, setComplianceLog] = useState([]);
   const [staffList, setStaffList] = useState([]);
-  const VENUE_ID = "498c51cc-46b2-41e3-84ab-1a6d48030afb";
+  const [venueName, setVenueName] = useState("Loading...");
+  const [orgVenues, setOrgVenues] = useState([]);
+  const [selectedVenueId, setSelectedVenueId] = useState(user?.venue_id || null);
+  const isOrgAdmin = user?.role === "org_admin";
+  const VENUE_ID = selectedVenueId;
 
   useEffect(() => {
+    // Load venue name
+    if (selectedVenueId) {
+      supabase.from("venues").select("name").eq("id", selectedVenueId).single()
+        .then(({ data }) => { if (data) setVenueName(data.name); });
+    }
+    // Load org venues for org_admin
+    if (isOrgAdmin && user?.org_id) {
+      supabase.from("venues").select("id, name, location").eq("org_id", user.org_id)
+        .then(({ data }) => {
+          if (data?.length) {
+            setOrgVenues(data);
+            if (!selectedVenueId) setSelectedVenueId(data[0].id);
+          }
+        });
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (!VENUE_ID) return;
     loadOverview();
     loadWeeklySales();
     loadTopProducts();
-  }, []);
+  }, [VENUE_ID]);
 
   useEffect(() => {
+    if (!VENUE_ID) return;
     if (activeSection === "products" || activeSection === "inventory") loadProducts();
     if (activeSection === "compliance") loadCompliance();
     if (activeSection === "staff") loadStaff();
-  }, [activeSection]);
+  }, [activeSection, VENUE_ID]);
 
   const loadOverview = async () => {
     setLoadingOverview(true);
@@ -1173,9 +1208,18 @@ function ManagerView() {
     <div className="manager-layout">
       <div className="sidebar">
         <div style={{ padding: "0 16px 16px", borderBottom: `1px solid ${DS.colors.border}`, marginBottom: 8 }}>
-          <div style={{ fontSize: 11, color: DS.colors.textMuted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>Venue</div>
-          <div style={{ fontSize: 15, fontWeight: 700 }}>The Crown Pub</div>
-          <div style={{ fontSize: 12, color: DS.colors.textSub }}>Manchester</div>
+          <div style={{ fontSize: 11, color: DS.colors.textMuted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>{isOrgAdmin ? "Organisation" : "Venue"}</div>
+          {isOrgAdmin && orgVenues.length > 0 ? (
+            <select
+              value={selectedVenueId || ""}
+              onChange={e => setSelectedVenueId(e.target.value)}
+              style={{ width: "100%", background: DS.colors.card, border: `1px solid ${DS.colors.border}`, color: DS.colors.text, padding: "6px 8px", borderRadius: 6, fontSize: 13, cursor: "pointer", outline: "none" }}
+            >
+              {orgVenues.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+            </select>
+          ) : (
+            <div style={{ fontSize: 15, fontWeight: 700 }}>{venueName}</div>
+          )}
         </div>
         <div className="sidebar-section">Navigation</div>
         {navItems.map(item => (
@@ -1588,13 +1632,13 @@ function LoginScreen({ onLogin }) {
       // Fetch role from staff_users table
       const { data: staffData, error: staffError } = await supabase
         .from("staff_users")
-        .select("role, venue_id")
+        .select("role, venue_id, org_id")
         .eq("email", email)
         .eq("is_active", true)
         .single();
 
       if (staffError || !staffData) throw new Error("No staff account found for this email.");
-      onLogin({ ...data.user, role: staffData.role, venue_id: staffData.venue_id });
+      onLogin({ ...data.user, role: staffData.role, venue_id: staffData.venue_id, org_id: staffData.org_id });
     } catch (e) {
       setError(e.message || "Login failed. Please check your credentials.");
     } finally {
@@ -1644,11 +1688,11 @@ export default function App() {
       if (session?.user) {
         const { data: staffData } = await supabase
           .from("staff_users")
-          .select("role, venue_id")
+          .select("role, venue_id, org_id")
           .eq("email", session.user.email)
           .eq("is_active", true)
           .single();
-        if (staffData) setUser({ ...session.user, role: staffData.role, venue_id: staffData.venue_id });
+        if (staffData) setUser({ ...session.user, role: staffData.role, venue_id: staffData.venue_id, org_id: staffData.org_id });
       }
       setAuthChecked(true);
     });
@@ -1707,12 +1751,13 @@ export default function App() {
   // Tab visibility based on role
   const isStaff = user?.role === "staff";
   const isManager = user?.role === "manager";
+  const isOrgAdmin = user?.role === "org_admin";
   const isAdmin = user?.role === "admin";
 
   const tabs = [
     { id: "kiosk",   label: "🖥 Customer Kiosk", show: true },
     { id: "staff",   label: "👤 Staff Dashboard", show: !!user },
-    { id: "manager", label: "📊 Venue Manager", show: isManager || isAdmin },
+    { id: "manager", label: "📊 Venue Manager", show: isManager || isOrgAdmin || isAdmin },
     { id: "admin",   label: "⚙️ Platform Admin", show: isAdmin },
   ].filter(t => t.show);
 
@@ -1737,7 +1782,7 @@ export default function App() {
             {user ? (
               <>
                 <div className="auth-role-badge">
-                  {user.role === "admin" ? "⚙️" : user.role === "manager" ? "📊" : "👤"} {user.role.charAt(0).toUpperCase() + user.role.slice(1)}
+                  {user.role === "admin" ? "⚙️" : user.role === "org_admin" ? "🏢" : user.role === "manager" ? "📊" : "👤"} {user.role === "org_admin" ? "Org Admin" : user.role.charAt(0).toUpperCase() + user.role.slice(1)}
                 </div>
                 <span style={{ fontSize: 12, color: DS.colors.textSub }}>{user.email}</span>
                 <button className="logout-btn" onClick={handleLogout}>Sign Out</button>
@@ -1752,8 +1797,8 @@ export default function App() {
         </nav>
         <div className="main-content">
           {activeTab === "kiosk" && <KioskView />}
-          {activeTab === "staff" && (user ? <StaffView /> : <LoginScreen onLogin={handleLogin} />)}
-          {activeTab === "manager" && ((isManager || isAdmin) ? <ManagerView /> : (
+          {activeTab === "staff" && (user ? <StaffView user={user} /> : <LoginScreen onLogin={handleLogin} />)}
+          {activeTab === "manager" && ((isManager || isOrgAdmin || isAdmin) ? <ManagerView user={user} /> : (
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", flexDirection: "column", gap: 16, color: DS.colors.textMuted }}>
               <div style={{ fontSize: 48 }}>🔒</div>
               <div style={{ fontSize: 18, fontWeight: 600 }}>Manager access required</div>
