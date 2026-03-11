@@ -1075,6 +1075,9 @@ function ManagerView({ user }) {
   const [venueName, setVenueName] = useState("Loading...");
   const [orgVenues, setOrgVenues] = useState([]);
   const [selectedVenueId, setSelectedVenueId] = useState(user?.venue_id || null);
+  const [selectedDay, setSelectedDay] = useState(null);
+  const [dayDetail, setDayDetail] = useState(null);
+  const [loadingDayDetail, setLoadingDayDetail] = useState(false);
   const isOrgAdmin = user?.role === "org_admin";
   const VENUE_ID = selectedVenueId;
 
@@ -1146,7 +1149,7 @@ function ManagerView({ user }) {
       const next = new Date(d); next.setDate(next.getDate() + 1);
       const { data } = await supabase.from("orders").select("total_pence").eq("venue_id", VENUE_ID).eq("status", "completed").gte("created_at", d.toISOString()).lt("created_at", next.toISOString());
       const total = (data || []).reduce((s, o) => s + (o.total_pence || 0), 0);
-      days.push({ day: d.toLocaleDateString("en-GB", { weekday: "short" }), sales: penceToGBP(total) });
+      days.push({ day: d.toLocaleDateString("en-GB", { weekday: "short" }), fullDate: d.toLocaleDateString("en-GB", { day: "numeric", month: "short" }), date: new Date(d), sales: penceToGBP(total) });
     }
     setWeeklySales(days);
   };
@@ -1163,6 +1166,55 @@ function ManagerView({ user }) {
     });
     const sorted = Object.values(map).sort((a, b) => b.units - a.units).slice(0, 8);
     setTopProducts(sorted);
+  };
+
+  const loadDayDetail = async (dayObj) => {
+    setSelectedDay(dayObj);
+    setLoadingDayDetail(true);
+    const start = new Date(dayObj.date); start.setHours(0,0,0,0);
+    const end = new Date(dayObj.date); end.setHours(23,59,59,999);
+
+    const [ordersRes, itemsRes, verifyRes] = await Promise.all([
+      supabase.from("orders").select("id, status, total_pence, payment_method, created_at").eq("venue_id", VENUE_ID).gte("created_at", start.toISOString()).lte("created_at", end.toISOString()).order("created_at", { ascending: false }),
+      supabase.from("order_items").select("product_id, quantity, unit_price_pence, products(name, brand, image_url), orders!inner(venue_id, created_at)").eq("orders.venue_id", VENUE_ID).gte("orders.created_at", start.toISOString()).lte("orders.created_at", end.toISOString()),
+      supabase.from("age_verifications").select("method, result").gte("verified_at", start.toISOString()).lte("verified_at", end.toISOString()),
+    ]);
+
+    const orders = ordersRes.data || [];
+    const completed = orders.filter(o => o.status === "completed");
+    const revenue = completed.reduce((s, o) => s + (o.total_pence || 0), 0);
+
+    // Aggregate product sales
+    const productMap = {};
+    (itemsRes.data || []).forEach(item => {
+      const id = item.product_id;
+      if (!productMap[id]) productMap[id] = { ...item.products, id, units: 0, revenue: 0 };
+      productMap[id].units += item.quantity;
+      productMap[id].revenue += item.quantity * item.unit_price_pence;
+    });
+
+    // Payment method breakdown
+    const paymentMap = {};
+    completed.forEach(o => {
+      const m = o.payment_method || "unknown";
+      paymentMap[m] = (paymentMap[m] || 0) + 1;
+    });
+
+    const verifications = verifyRes.data || [];
+    const passes = verifications.filter(v => v.result === "pass").length;
+
+    setDayDetail({
+      orders,
+      revenue,
+      completedCount: completed.length,
+      rejectedCount: orders.filter(o => o.status === "rejected").length,
+      avgOrder: completed.length > 0 ? revenue / completed.length : 0,
+      topProducts: Object.values(productMap).sort((a, b) => b.units - a.units).slice(0, 6),
+      paymentBreakdown: paymentMap,
+      verifications: verifications.length,
+      passRate: verifications.length > 0 ? Math.round((passes / verifications.length) * 100) : 100,
+    });
+    setLoadingDayDetail(false);
   };
 
   const loadProducts = async () => {
@@ -1263,17 +1315,94 @@ function ManagerView({ user }) {
               </div>
             )}
             <div className="chart-card">
-              <div className="chart-title">Last 7 Days Sales (£)</div>
+              <div className="chart-title" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span>Last 7 Days Sales (£)</span>
+                <span style={{ fontSize: 11, color: DS.colors.textMuted, fontWeight: 400 }}>Click a bar for daily breakdown</span>
+              </div>
               <div className="bar-chart">
                 {weeklySales.map(d => (
-                  <div key={d.day} className="bar-col">
+                  <div key={d.day} className="bar-col" onClick={() => loadDayDetail(d)} style={{ cursor: "pointer" }}>
                     <div className="bar-val">{d.sales.toFixed(0)}</div>
-                    <div className="bar-fill" style={{ height: `${(d.sales / maxWeeklySale) * 80}px` }} />
-                    <div className="bar-label">{d.day}</div>
+                    <div className="bar-fill" style={{ height: `${(d.sales / maxWeeklySale) * 80}px`, background: selectedDay?.day === d.day ? DS.colors.purple : DS.colors.accent, opacity: selectedDay && selectedDay.day !== d.day ? 0.4 : 0.9 }} />
+                    <div className="bar-label" style={{ color: selectedDay?.day === d.day ? DS.colors.white : DS.colors.textMuted }}>{d.day}</div>
+                    <div style={{ fontSize: 9, color: DS.colors.textMuted }}>{d.fullDate}</div>
                   </div>
                 ))}
               </div>
             </div>
+
+            {selectedDay && (
+              <div className="chart-card" style={{ borderColor: DS.colors.purple }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                  <div>
+                    <div className="chart-title" style={{ marginBottom: 2 }}>{selectedDay.fullDate} — Daily Breakdown</div>
+                    <div style={{ fontSize: 12, color: DS.colors.textMuted }}>{selectedDay.day}</div>
+                  </div>
+                  <button className="btn-sm btn-outline" onClick={() => { setSelectedDay(null); setDayDetail(null); }}>✕ Close</button>
+                </div>
+                {loadingDayDetail ? (
+                  <div style={{ display: "flex", justifyContent: "center", padding: 40 }}><div className="spinner" /></div>
+                ) : dayDetail && (
+                  <>
+                    <div className="stats-row" style={{ marginBottom: 16 }}>
+                      <div className="stat-card"><div className="stat-label">Revenue</div><div className="stat-value" style={{ fontSize: 20 }}>{fmt(penceToGBP(dayDetail.revenue))}</div></div>
+                      <div className="stat-card"><div className="stat-label">Completed Orders</div><div className="stat-value" style={{ fontSize: 20 }}>{dayDetail.completedCount}</div></div>
+                      <div className="stat-card"><div className="stat-label">Avg Order</div><div className="stat-value" style={{ fontSize: 20 }}>{fmt(penceToGBP(dayDetail.avgOrder))}</div></div>
+                      <div className="stat-card"><div className="stat-label">Rejected</div><div className="stat-value" style={{ fontSize: 20, color: DS.colors.danger }}>{dayDetail.rejectedCount}</div></div>
+                      <div className="stat-card"><div className="stat-label">Age Verifications</div><div className="stat-value" style={{ fontSize: 20 }}>{dayDetail.verifications}</div><div className="stat-delta" style={{ color: dayDetail.passRate === 100 ? DS.colors.accent : DS.colors.warn }}>{dayDetail.passRate}% pass</div></div>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                      <div>
+                        <div className="chart-title" style={{ fontSize: 12, marginBottom: 10 }}>Top Products</div>
+                        {dayDetail.topProducts.length === 0 ? (
+                          <div style={{ color: DS.colors.textMuted, fontSize: 13 }}>No sales data</div>
+                        ) : dayDetail.topProducts.map(p => (
+                          <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: `1px solid ${DS.colors.border}` }}>
+                            <ProductImage imageUrl={p.image_url} name={p.name} size="thumb" />
+                            <div style={{ flex: 1 }}>
+                              <div style={{ fontSize: 12, fontWeight: 600 }}>{p.name}</div>
+                              <div style={{ fontSize: 11, color: DS.colors.textMuted }}>{p.brand}</div>
+                            </div>
+                            <div style={{ textAlign: "right" }}>
+                              <div style={{ fontSize: 13, color: DS.colors.accent }}>{fmt(penceToGBP(p.revenue))}</div>
+                              <div style={{ fontSize: 11, color: DS.colors.textMuted }}>{p.units} units</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <div>
+                        <div className="chart-title" style={{ fontSize: 12, marginBottom: 10 }}>Payment Methods</div>
+                        {Object.entries(dayDetail.paymentBreakdown).length === 0 ? (
+                          <div style={{ color: DS.colors.textMuted, fontSize: 13 }}>No payments</div>
+                        ) : Object.entries(dayDetail.paymentBreakdown).map(([method, count]) => (
+                          <div key={method} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: `1px solid ${DS.colors.border}` }}>
+                            <div style={{ fontSize: 13, textTransform: "capitalize" }}>{method.replace("_", " ")}</div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                              <div style={{ width: 80, height: 6, background: DS.colors.border, borderRadius: 3, overflow: "hidden" }}>
+                                <div style={{ width: `${(count / dayDetail.completedCount) * 100}%`, height: "100%", background: DS.colors.accent, borderRadius: 3 }} />
+                              </div>
+                              <span style={{ fontSize: 13, color: DS.colors.white, width: 20, textAlign: "right" }}>{count}</span>
+                            </div>
+                          </div>
+                        ))}
+                        <div style={{ marginTop: 16 }}>
+                          <div className="chart-title" style={{ fontSize: 12, marginBottom: 10 }}>All Orders</div>
+                          <div style={{ maxHeight: 180, overflowY: "auto" }}>
+                            {dayDetail.orders.map(o => (
+                              <div key={o.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: `1px solid ${DS.colors.border}`, fontSize: 12 }}>
+                                <span style={{ color: DS.colors.textMuted }}>{new Date(o.created_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}</span>
+                                <span className="tag-pill" style={o.status === "completed" ? { background: DS.colors.accentGlow, color: DS.colors.accent } : o.status === "rejected" ? { background: DS.colors.dangerGlow, color: DS.colors.danger } : { background: "rgba(255,180,0,0.1)", color: DS.colors.warn }}>{o.status}</span>
+                                <span style={{ color: DS.colors.accent }}>{fmt(penceToGBP(o.total_pence))}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
             <div className="chart-card">
               <div className="chart-title">Top Products by Units Sold</div>
               <table className="data-table">
@@ -1703,27 +1832,24 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Keep pending badge count in sync
+  // Keep pending badge count in sync — scoped to user's venue
   useEffect(() => {
+    const fetchPending = async () => {
+      let query = supabase.from("orders").select("*", { count: "exact", head: true }).eq("status", "pending");
+      if (user?.venue_id) query = query.eq("venue_id", user.venue_id);
+      const { count } = await query;
+      setPendingCount(count || 0);
+    };
+
+    fetchPending();
+
     const channel = supabase
       .channel("pending-count")
-      .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, async () => {
-        const { count } = await supabase
-          .from("orders")
-          .select("*", { count: "exact", head: true })
-          .eq("status", "pending");
-        setPendingCount(count || 0);
-      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, fetchPending)
       .subscribe();
 
-    supabase
-      .from("orders")
-      .select("*", { count: "exact", head: true })
-      .eq("status", "pending")
-      .then(({ count }) => setPendingCount(count || 0));
-
     return () => supabase.removeChannel(channel);
-  }, []);
+  }, [user?.venue_id]);
 
   const handleLogin = (loggedInUser) => {
     setUser(loggedInUser);
