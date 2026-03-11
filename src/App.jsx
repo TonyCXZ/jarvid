@@ -116,6 +116,10 @@ const GlobalStyles = () => (
     .product-card.out-of-stock { opacity: 0.45; border-color: ${DS.colors.border}; pointer-events: none; }
     .product-card.out-of-stock:hover { transform: none; background: ${DS.colors.card}; border-color: ${DS.colors.border}; }
     .out-of-stock-badge { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.75); color: ${DS.colors.textMuted}; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; padding: 3px 8px; border-radius: 4px; text-transform: uppercase; }
+    .kiosk-nav { display: flex; align-items: center; justify-content: space-between; padding: 10px 20px; background: ${DS.colors.surface}; border-bottom: 1px solid ${DS.colors.border}; flex-shrink: 0; }
+    .kiosk-nav-btn { display: flex; align-items: center; gap: 6px; background: transparent; border: 1px solid ${DS.colors.border}; border-radius: 8px; color: ${DS.colors.textSub}; font-size: 13px; padding: 7px 14px; cursor: pointer; transition: all 0.15s; font-family: ${DS.font.body}; }
+    .kiosk-nav-btn:hover { border-color: ${DS.colors.accent}; color: ${DS.colors.accent}; }
+    .kiosk-nav-title { font-family: ${DS.font.display}; font-size: 13px; font-weight: 700; color: ${DS.colors.textMuted}; letter-spacing: 0.1em; text-transform: uppercase; }
     .popular-badge { position: absolute; top: 10px; right: 10px; padding: 2px 8px; border-radius: 4px; background: ${DS.colors.accent}; color: ${DS.colors.bg}; font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
     .product-image { width: 100%; height: 120px; object-fit: contain; border-radius: 8px; background: rgba(255,255,255,0.04); display: block; }
     .product-image-wrap { width: 100%; height: 120px; border-radius: 8px; background: rgba(255,255,255,0.04); display: flex; align-items: center; justify-content: center; overflow: hidden; }
@@ -365,6 +369,18 @@ function ProductImage({ imageUrl, name, size = "card" }) {
 // ============================================================
 // KIOSK — WELCOME
 // ============================================================
+function KioskNav({ onBack, onHome, title, showBack = true }) {
+  return (
+    <div className="kiosk-nav">
+      {showBack && onBack ? (
+        <button className="kiosk-nav-btn" onClick={onBack}>← Back</button>
+      ) : <div style={{ width: 80 }} />}
+      {title && <div className="kiosk-nav-title">{title}</div>}
+      <button className="kiosk-nav-btn" onClick={onHome}>⌂ Home</button>
+    </div>
+  );
+}
+
 function KioskWelcome({ onStart }) {
   return (
     <div className="welcome-screen">
@@ -389,7 +405,7 @@ function KioskWelcome({ onStart }) {
 // ============================================================
 // KIOSK — BROWSE (loads products from Supabase)
 // ============================================================
-function KioskBrowse({ cart, onAddToCart, onRemoveFromCart, onCheckout, venueId, onProductsLoaded }) {
+function KioskBrowse({ cart, onAddToCart, onRemoveFromCart, onCheckout, venueId, onProductsLoaded, onHome }) {
   const [cat, setCat] = useState("all");
   const [showCart, setShowCart] = useState(false);
   const [products, setProducts] = useState([]);
@@ -445,6 +461,7 @@ function KioskBrowse({ cart, onAddToCart, onRemoveFromCart, onCheckout, venueId,
 
   return (
     <div className="browse-layout" style={{ position: "relative" }}>
+      <KioskNav onHome={onHome} title="Browse Products" showBack={false} />
       <div className="browse-header">
         <div className="browse-title">CHOOSE YOUR PRODUCTS</div>
         {totalItems > 0 && (
@@ -564,7 +581,7 @@ function KioskBrowse({ cart, onAddToCart, onRemoveFromCart, onCheckout, venueId,
 // ============================================================
 // KIOSK — AGE VERIFY (logs to Supabase)
 // ============================================================
-function KioskAgeVerify({ onVerified, onBack, kioskId }) {
+function KioskAgeVerify({ onVerified, onBack, onHome, kioskId }) {
   const [phase, setPhase] = useState("choose");
   const [method, setMethod] = useState(null);
   const [verificationId, setVerificationId] = useState(null);
@@ -673,7 +690,7 @@ function KioskAgeVerify({ onVerified, onBack, kioskId }) {
           <div className="verify-desc">Ask staff to verify</div>
         </div>
       </div>
-      <button className="btn-sm btn-outline" onClick={onBack}>← Back to products</button>
+
     </div>
   );
 }
@@ -681,7 +698,7 @@ function KioskAgeVerify({ onVerified, onBack, kioskId }) {
 // ============================================================
 // KIOSK — PAYMENT (simulated; creates real order in Supabase)
 // ============================================================
-function KioskPayment({ cart, products, onPaid, verificationId, kioskId, venueId }) {
+function KioskPayment({ cart, products, onPaid, onBack, onHome, verificationId, kioskId, venueId }) {
   const [phase, setPhase] = useState("waiting");
   const [orderId, setOrderId] = useState(null);
   const [error, setError] = useState(null);
@@ -773,7 +790,16 @@ function KioskPayment({ cart, products, onPaid, verificationId, kioskId, venueId
 
   return (
     <div className="payment-screen">
-      {error && <div className="error-banner">{error}</div>}
+      <KioskNav onBack={onBack} onHome={onHome} title="Payment" showBack={phase === "waiting"} />
+      {error && (
+        <div className="error-banner" style={{ margin: "0 20px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <span>{error}</span>
+          <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+            <button className="kiosk-nav-btn" onClick={onBack} style={{ fontSize: 12, padding: "5px 10px" }}>← Edit Cart</button>
+            <button className="kiosk-nav-btn" onClick={onHome} style={{ fontSize: 12, padding: "5px 10px" }}>⌂ Start Over</button>
+          </div>
+        </div>
+      )}
       <div className="payment-heading">
         {phase === "done" ? "✅ PAYMENT SUCCESS" : phase === "processing" ? "PROCESSING…" : "READY TO PAY"}
       </div>
@@ -904,6 +930,8 @@ function KioskView({ venueId: propVenueId }) {
 
   const step = { welcome: -1, browse: 0, verify: 1, payment: 2, confirm: 3 }[screen] ?? 0;
 
+  const goHome = () => { setCart({}); setVerificationId(null); setPlacedOrderId(null); setScreen("welcome"); };
+
   return (
     <div className="kiosk-shell">
       {screen === "welcome" && <KioskWelcome onStart={() => setScreen("browse")} />}
@@ -915,12 +943,14 @@ function KioskView({ venueId: propVenueId }) {
           onCheckout={() => setScreen("verify")}
           venueId={venueId}
           onProductsLoaded={setProducts}
+          onHome={goHome}
         />
       )}
       {screen === "verify" && (
         <KioskAgeVerify
           onVerified={(vid) => { setVerificationId(vid); setScreen("payment"); }}
           onBack={() => setScreen("browse")}
+          onHome={goHome}
           kioskId={kioskId}
         />
       )}
@@ -932,10 +962,12 @@ function KioskView({ venueId: propVenueId }) {
           kioskId={kioskId}
           venueId={venueId}
           onPaid={(oid) => { setPlacedOrderId(oid); setScreen("confirm"); }}
+          onBack={() => setScreen("verify")}
+          onHome={goHome}
         />
       )}
       {screen === "confirm" && (
-        <KioskConfirmation cart={cart} products={products} orderId={placedOrderId} onReset={() => { setCart({}); setVerificationId(null); setPlacedOrderId(null); setScreen("welcome"); }} />
+        <KioskConfirmation cart={cart} products={products} orderId={placedOrderId} onReset={goHome} />
       )}
       {screen !== "welcome" && <KioskProgress step={step} />}
     </div>
