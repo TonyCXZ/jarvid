@@ -285,6 +285,21 @@ const GlobalStyles = () => (
     .stock-bar-wrap { display: flex; align-items: center; gap: 8px; }
     .stock-bar-bg { flex: 1; height: 4px; border-radius: 2px; background: ${DS.colors.border}; }
     .stock-bar-fill { height: 4px; border-radius: 2px; transition: width 0.3s; }
+    .pin-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.92); z-index: 9999; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(8px); }
+    .pin-box { background: #12121a; border: 1px solid ${DS.colors.border}; border-radius: 16px; padding: 40px; width: 320px; text-align: center; }
+    .pin-title { font-family: ${DS.font.display}; font-size: 22px; font-weight: 900; color: ${DS.colors.text}; margin-bottom: 6px; }
+    .pin-sub { font-size: 13px; color: ${DS.colors.textMuted}; margin-bottom: 28px; }
+    .pin-dots { display: flex; justify-content: center; gap: 12px; margin-bottom: 24px; }
+    .pin-dot { width: 14px; height: 14px; border-radius: 50%; border: 2px solid ${DS.colors.border}; transition: all 0.15s; }
+    .pin-dot.filled { background: ${DS.colors.accent}; border-color: ${DS.colors.accent}; }
+    .pin-dot.error { background: ${DS.colors.danger}; border-color: ${DS.colors.danger}; }
+    .pin-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
+    .pin-key { background: #1a1a28; border: 1px solid ${DS.colors.border}; border-radius: 10px; padding: 16px; font-size: 20px; font-family: ${DS.font.display}; font-weight: 700; color: ${DS.colors.text}; cursor: pointer; transition: all 0.1s; user-select: none; }
+    .pin-key:hover { background: #22223a; border-color: ${DS.colors.accent}; }
+    .pin-key:active { transform: scale(0.93); }
+    .pin-key.wide { grid-column: span 2; }
+    .pin-error-msg { font-size: 12px; color: ${DS.colors.danger}; min-height: 18px; margin-top: 4px; }
+    .logo-tap-hint { font-size: 10px; color: transparent; user-select: none; }
     .tag-pill { display: inline-flex; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; }
     .auth-screen { width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; background: radial-gradient(ellipse 80% 60% at 50% 40%, rgba(0,245,196,0.06) 0%, transparent 70%); }
     .auth-card { width: 420px; padding: 48px 40px; background: #12121a; border: 1px solid #2a2a3e; border-radius: 20px; display: flex; flex-direction: column; gap: 28px; }
@@ -1134,6 +1149,10 @@ function ManagerView({ user }) {
   const [analyticsData, setAnalyticsData] = useState([]);
   const [loadingAnalytics, setLoadingAnalytics] = useState(false);
   const [analyticsSelected, setAnalyticsSelected] = useState(null);
+  const [pinEdit, setPinEdit] = useState("");
+  const [pinSaving, setPinSaving] = useState(false);
+  const [pinSaved, setPinSaved] = useState(false);
+  const [currentPin, setCurrentPin] = useState("");
   const isOrgAdmin = user?.role === "org_admin";
   const VENUE_ID = selectedVenueId;
 
@@ -1168,6 +1187,10 @@ function ManagerView({ user }) {
     if (activeSection === "compliance") loadCompliance();
     if (activeSection === "staff") loadStaff();
     if (activeSection === "analytics") loadAnalytics("weekly");
+    if (activeSection === "settings") {
+      supabase.from("venues").select("kiosk_pin").eq("id", VENUE_ID).single()
+        .then(({ data }) => { if (data) { setCurrentPin(data.kiosk_pin || ""); setPinEdit(data.kiosk_pin || ""); } });
+    }
   }, [activeSection, VENUE_ID]);
 
   const loadOverview = async () => {
@@ -1274,6 +1297,15 @@ function ManagerView({ user }) {
     setLoadingDayDetail(false);
   };
 
+  const savePin = async () => {
+    if (pinEdit.length < 4) return;
+    if (!/^\d+$/.test(pinEdit)) { alert("PIN must be numbers only."); return; }
+    setPinSaving(true);
+    const { error } = await supabase.from("venues").update({ kiosk_pin: pinEdit }).eq("id", VENUE_ID);
+    setPinSaving(false);
+    if (!error) { setCurrentPin(pinEdit); setPinSaved(true); setTimeout(() => setPinSaved(false), 3000); }
+  };
+
   const loadAnalytics = async (view) => {
     if (!VENUE_ID) return;
     setLoadingAnalytics(true);
@@ -1368,6 +1400,7 @@ function ManagerView({ user }) {
     { id: "inventory",  icon: "🏭", label: "Inventory" },
     { id: "compliance", icon: "🔒", label: "Compliance" },
     { id: "staff",      icon: "👥", label: "Staff" },
+    { id: "settings",   icon: "⚙️", label: "Settings" },
   ];
 
   return (
@@ -1824,6 +1857,55 @@ function ManagerView({ user }) {
             </div>
           </>
         )}
+
+        {activeSection === "settings" && (
+          <>
+            <div>
+              <div className="section-title">VENUE SETTINGS</div>
+              <div className="section-sub">Kiosk configuration for {venueName}</div>
+            </div>
+            <div className="chart-card" style={{ maxWidth: 480 }}>
+              <div className="chart-title" style={{ marginBottom: 4 }}>🔐 Kiosk PIN</div>
+              <div style={{ fontSize: 13, color: DS.colors.textMuted, marginBottom: 20 }}>
+                Staff tap the JarvID logo 5 times on the kiosk to reveal the PIN entry screen.
+                Each venue has its own PIN.
+              </div>
+              <div style={{ marginBottom: 8 }}>
+                <div style={{ fontSize: 11, color: DS.colors.textMuted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>Current PIN</div>
+                <div style={{ display: "flex", gap: 6, marginBottom: 20 }}>
+                  {(currentPin || "----").split("").map((d, i) => (
+                    <div key={i} style={{ width: 40, height: 48, background: DS.colors.surface, border: `1px solid ${DS.colors.border}`, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: DS.font.display, fontSize: 22, fontWeight: 700, color: DS.colors.accent }}>
+                      {d}
+                    </div>
+                  ))}
+                </div>
+                <div style={{ fontSize: 11, color: DS.colors.textMuted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>New PIN</div>
+                <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={6}
+                    placeholder="Enter new PIN"
+                    value={pinEdit}
+                    onChange={e => { const v = e.target.value.replace(/\D/g, ""); setPinEdit(v); setPinSaved(false); }}
+                    style={{ background: DS.colors.surface, border: `1px solid ${DS.colors.border}`, borderRadius: 8, padding: "10px 14px", color: DS.colors.text, fontSize: 18, fontFamily: DS.font.display, fontWeight: 700, width: 140, outline: "none", letterSpacing: "0.2em" }}
+                  />
+                  <button
+                    className={`btn-sm ${pinSaved ? "" : "btn-accent"}`}
+                    onClick={savePin}
+                    disabled={pinSaving || pinEdit.length < 4 || pinEdit === currentPin}
+                    style={pinSaved ? { background: DS.colors.accentGlow, color: DS.colors.accent, borderColor: DS.colors.accent } : {}}
+                  >
+                    {pinSaving ? "Saving…" : pinSaved ? "✓ Saved" : "Update PIN"}
+                  </button>
+                </div>
+                {pinEdit.length > 0 && pinEdit.length < 4 && (
+                  <div style={{ fontSize: 12, color: DS.colors.warn, marginTop: 8 }}>PIN must be at least 4 digits</div>
+                )}
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -1906,6 +1988,28 @@ function AdminView() {
                     <div className="venue-meta">
                       <span>📱 {v.kiosks || 1} kiosk{(v.kiosks || 1) !== 1 ? "s" : ""}</span>
                       <span style={{ color: v.status === "online" ? DS.colors.accent : DS.colors.danger }}>● {v.status}</span>
+                    </div>
+                    <div style={{ marginBottom: 10 }}>
+                      <div style={{ fontSize: 11, color: DS.colors.textMuted, marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.06em" }}>Kiosk PIN</div>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          maxLength={6}
+                          defaultValue={v.kiosk_pin || "1234"}
+                          key={v.id}
+                          id={`pin-${v.id}`}
+                          style={{ background: DS.colors.surface, border: `1px solid ${DS.colors.border}`, borderRadius: 6, padding: "6px 10px", color: DS.colors.accent, fontSize: 16, fontFamily: DS.font.display, fontWeight: 700, width: 90, outline: "none", letterSpacing: "0.15em" }}
+                          onChange={e => e.target.value = e.target.value.replace(/\D/g, "")}
+                        />
+                        <button className="btn-sm btn-accent" onClick={async () => {
+                          const input = document.getElementById(`pin-${v.id}`);
+                          const newPin = input?.value;
+                          if (!newPin || newPin.length < 4) { alert("PIN must be at least 4 digits"); return; }
+                          const { error } = await supabase.from("venues").update({ kiosk_pin: newPin }).eq("id", v.id);
+                          if (!error) { input.style.borderColor = DS.colors.accent; setTimeout(() => input.style.borderColor = DS.colors.border, 2000); }
+                        }}>Save</button>
+                      </div>
                     </div>
                     <div style={{ display: "flex", gap: 8 }}>
                       <button className="btn-sm btn-outline" style={{ flex: 1 }}>View</button>
@@ -2060,6 +2164,28 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
+  const [kioskLocked, setKioskLocked] = useState(true);
+  const [showPinOverlay, setShowPinOverlay] = useState(false);
+  const [pinEntry, setPinEntry] = useState("");
+  const [pinError, setPinError] = useState("");
+  const [pinShake, setPinShake] = useState(false);
+  const [logoTapCount, setLogoTapCount] = useState(0);
+  const logoTapTimer = useRef(null);
+  const [kioskPin, setKioskPin] = useState(null);
+  const [kioskVenueId, setKioskVenueId] = useState(null);
+
+  // Load kiosk PIN for this device — check URL param ?venue=<id> or fall back to first venue
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const venueParam = params.get("venue");
+    const query = venueParam
+      ? supabase.from("venues").select("id, kiosk_pin").eq("id", venueParam).single()
+      : supabase.from("venues").select("id, kiosk_pin").order("name").limit(1).single();
+    query.then(({ data }) => {
+      if (data) { setKioskPin(data.kiosk_pin || "1234"); setKioskVenueId(data.id); }
+      else setKioskPin("1234");
+    });
+  }, []);
 
   // Check for existing session on mount
   useEffect(() => {
@@ -2101,13 +2227,48 @@ export default function App() {
     return () => supabase.removeChannel(channel);
   }, [user?.venue_id]);
 
+  const handleLogoTap = () => {
+    if (!kioskLocked) return;
+    const newCount = logoTapCount + 1;
+    setLogoTapCount(newCount);
+    clearTimeout(logoTapTimer.current);
+    if (newCount >= 5) {
+      setLogoTapCount(0);
+      setShowPinOverlay(true);
+      setPinEntry("");
+      setPinError("");
+    } else {
+      logoTapTimer.current = setTimeout(() => setLogoTapCount(0), 2000);
+    }
+  };
+
+  const handlePinKey = (key) => {
+    if (key === "clear") { setPinEntry(""); setPinError(""); return; }
+    if (key === "back") { setPinEntry(p => p.slice(0, -1)); setPinError(""); return; }
+    const next = pinEntry + key;
+    setPinEntry(next);
+    if (next.length === 4) {
+      if (kioskPin && next === kioskPin) {
+        setShowPinOverlay(false);
+        setKioskLocked(false);
+        setPinEntry("");
+        setPinError("");
+        setShowLogin(true);
+      } else {
+        setPinError("Incorrect PIN. Try again.");
+        setPinShake(true);
+        setTimeout(() => { setPinEntry(""); setPinShake(false); }, 600);
+      }
+    }
+  };
+
   const handleLogin = (loggedInUser) => {
     setUser(loggedInUser);
     setShowLogin(false);
-    // Auto-navigate to correct dashboard based on role
+    setKioskLocked(false);
     if (loggedInUser.role === "admin") {
       setActiveTab("admin");
-    } else if (loggedInUser.role === "manager") {
+    } else if (loggedInUser.role === "org_admin" || loggedInUser.role === "manager") {
       setActiveTab("manager");
     } else {
       setActiveTab("staff");
@@ -2118,6 +2279,7 @@ export default function App() {
     await supabase.auth.signOut();
     setUser(null);
     setActiveTab("kiosk");
+    setKioskLocked(true);
   };
 
   if (!authChecked) return <><GlobalStyles /><div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "#0a0a0f" }}><div className="spinner" /></div></>;
@@ -2132,17 +2294,41 @@ export default function App() {
 
   const tabs = [
     { id: "kiosk",   label: "🖥 Customer Kiosk", show: true },
-    { id: "staff",   label: "👤 Staff Dashboard", show: !!user },
-    { id: "manager", label: "📊 Venue Manager", show: isManager || isOrgAdmin || isAdmin },
-    { id: "admin",   label: "⚙️ Platform Admin", show: isAdmin },
+    { id: "staff",   label: "👤 Staff Dashboard", show: !!user && !kioskLocked },
+    { id: "manager", label: "📊 Venue Manager", show: (isManager || isOrgAdmin || isAdmin) && !kioskLocked },
+    { id: "admin",   label: "⚙️ Platform Admin", show: isAdmin && !kioskLocked },
   ].filter(t => t.show);
 
   return (
     <>
       <GlobalStyles />
       <div className="app-root">
+        {showPinOverlay && (
+          <div className="pin-overlay">
+            <div className="pin-box" style={{ animation: pinShake ? "shake 0.4s" : "none" }}>
+              <div className="pin-title">Staff Access</div>
+              <div className="pin-sub">Enter your PIN to continue</div>
+              <div className="pin-dots">
+                {[0,1,2,3].map(i => (
+                  <div key={i} className={`pin-dot ${pinEntry.length > i ? (pinError ? "error" : "filled") : ""}`} />
+                ))}
+              </div>
+              <div className="pin-grid">
+                {["1","2","3","4","5","6","7","8","9"].map(k => (
+                  <button key={k} className="pin-key" onClick={() => handlePinKey(k)}>{k}</button>
+                ))}
+                <button className="pin-key" onClick={() => handlePinKey("clear")} style={{ fontSize: 13, color: DS.colors.textMuted }}>CLR</button>
+                <button className="pin-key" onClick={() => handlePinKey("0")}>0</button>
+                <button className="pin-key" onClick={() => handlePinKey("back")} style={{ fontSize: 13 }}>⌫</button>
+              </div>
+              <div className="pin-error-msg">{pinError}</div>
+              <button className="btn-sm btn-outline" style={{ marginTop: 8, width: "100%" }} onClick={() => { setShowPinOverlay(false); setPinEntry(""); setPinError(""); }}>Cancel</button>
+            </div>
+          </div>
+        )}
+        <style>{`@keyframes shake { 0%,100%{transform:translateX(0)} 20%,60%{transform:translateX(-8px)} 40%,80%{transform:translateX(8px)} }`}</style>
         <nav className="top-nav">
-          <div className="nav-logo">J<span>arv</span>ID</div>
+          <div className="nav-logo" onClick={handleLogoTap} style={{ cursor: kioskLocked ? "default" : "pointer", userSelect: "none" }}>J<span>arv</span>ID</div>
           <div className="nav-tabs">
             {tabs.map(t => (
               <button key={t.id} className={`nav-tab ${activeTab === t.id ? "active" : ""}`} onClick={() => {
@@ -2155,7 +2341,7 @@ export default function App() {
             ))}
           </div>
           <div className="nav-right">
-            {user ? (
+            {user && !kioskLocked ? (
               <>
                 <div className="auth-role-badge">
                   {user.role === "admin" ? "⚙️" : user.role === "org_admin" ? "🏢" : user.role === "manager" ? "📊" : "👤"} {user.role === "org_admin" ? "Org Admin" : user.role.charAt(0).toUpperCase() + user.role.slice(1)}
@@ -2163,6 +2349,8 @@ export default function App() {
                 <span style={{ fontSize: 12, color: DS.colors.textSub }}>{user.email}</span>
                 <button className="logout-btn" onClick={handleLogout}>Sign Out</button>
               </>
+            ) : kioskLocked ? (
+              <span style={{ fontSize: 11, color: DS.colors.textMuted, letterSpacing: "0.05em" }}>KIOSK MODE</span>
             ) : (
               <button className="logout-btn" style={{ borderColor: DS.colors.accent, color: DS.colors.accent }} onClick={() => setShowLogin(true)}>
                 Staff Login
