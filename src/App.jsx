@@ -307,6 +307,10 @@ const GlobalStyles = () => (
     .pin-key.wide { grid-column: span 2; }
     .pin-error-msg { font-size: 12px; color: ${DS.colors.danger}; min-height: 18px; margin-top: 4px; }
     .logo-tap-hint { font-size: 10px; color: transparent; user-select: none; }
+    .timeout-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.88); z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; backdrop-filter: blur(6px); }
+    .timeout-circle { width: 100px; height: 100px; border-radius: 50%; border: 4px solid ${DS.colors.warn}; display: flex; align-items: center; justify-content: center; font-family: ${DS.font.display}; font-size: 36px; font-weight: 900; color: ${DS.colors.warn}; }
+    .timeout-heading { font-family: ${DS.font.display}; font-size: 26px; font-weight: 900; color: ${DS.colors.white}; }
+    .timeout-sub { font-size: 14px; color: ${DS.colors.textSub}; text-align: center; max-width: 280px; }
     .tag-pill { display: inline-flex; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; }
     .auth-screen { width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; background: radial-gradient(ellipse 80% 60% at 50% 40%, rgba(0,245,196,0.06) 0%, transparent 70%); }
     .auth-card { width: 420px; padding: 48px 40px; background: #12121a; border: 1px solid #2a2a3e; border-radius: 20px; display: flex; flex-direction: column; gap: 28px; }
@@ -917,25 +921,85 @@ function KioskView({ venueId: propVenueId }) {
   const [products, setProducts] = useState([]);
   const [verificationId, setVerificationId] = useState(null);
   const [placedOrderId, setPlacedOrderId] = useState(null);
+  const [showTimeoutWarning, setShowTimeoutWarning] = useState(false);
+  const [timeoutCountdown, setTimeoutCountdown] = useState(30);
+  const inactivityTimer = useRef(null);
+  const countdownTimer = useRef(null);
 
-  // Use venue from URL param passed down from App root
+  const INACTIVITY_SECONDS = 90;
+  const WARNING_SECONDS = 30;
+
   const venueId = propVenueId || null;
   const kioskId = null;
 
-  const addToCart = (id) => setCart(c => ({ ...c, [id]: (c[id] || 0) + 1 }));
-  const removeFromCart = (id) => setCart(c => {
+  const goHome = () => {
+    setCart({});
+    setVerificationId(null);
+    setPlacedOrderId(null);
+    setScreen("welcome");
+    setShowTimeoutWarning(false);
+    clearTimeout(inactivityTimer.current);
+    clearInterval(countdownTimer.current);
+  };
+
+  const resetInactivityTimer = useCallback(() => {
+    if (showTimeoutWarning) return;
+    clearTimeout(inactivityTimer.current);
+    inactivityTimer.current = setTimeout(() => {
+      setShowTimeoutWarning(true);
+      setTimeoutCountdown(WARNING_SECONDS);
+      countdownTimer.current = setInterval(() => {
+        setTimeoutCountdown(c => {
+          if (c <= 1) {
+            clearInterval(countdownTimer.current);
+            goHome();
+            return 0;
+          }
+          return c - 1;
+        });
+      }, 1000);
+    }, INACTIVITY_SECONDS * 1000);
+  }, [showTimeoutWarning]);
+
+  // Start/stop inactivity timer based on screen
+  useEffect(() => {
+    const activeScreens = ["browse", "verify", "payment"];
+    if (activeScreens.includes(screen)) {
+      resetInactivityTimer();
+    } else {
+      clearTimeout(inactivityTimer.current);
+      clearInterval(countdownTimer.current);
+      setShowTimeoutWarning(false);
+    }
+    return () => {
+      clearTimeout(inactivityTimer.current);
+      clearInterval(countdownTimer.current);
+    };
+  }, [screen]);
+
+  const handleActivity = () => {
+    if (showTimeoutWarning) return;
+    resetInactivityTimer();
+  };
+
+  const dismissTimeout = () => {
+    clearInterval(countdownTimer.current);
+    setShowTimeoutWarning(false);
+    resetInactivityTimer();
+  };
+
+  const addToCart = (id) => { handleActivity(); setCart(c => ({ ...c, [id]: (c[id] || 0) + 1 })); };
+  const removeFromCart = (id) => { handleActivity(); setCart(c => {
     const n = { ...c };
     if (n[id] > 1) n[id]--;
     else delete n[id];
     return n;
-  });
+  }); };
 
   const step = { welcome: -1, browse: 0, verify: 1, payment: 2, confirm: 3 }[screen] ?? 0;
 
-  const goHome = () => { setCart({}); setVerificationId(null); setPlacedOrderId(null); setScreen("welcome"); };
-
   return (
-    <div className="kiosk-shell">
+    <div className="kiosk-shell" onPointerDown={handleActivity} onPointerMove={handleActivity}>
       {screen === "welcome" && <KioskWelcome onStart={() => setScreen("browse")} />}
       {screen === "browse" && (
         <KioskBrowse
@@ -972,6 +1036,20 @@ function KioskView({ venueId: propVenueId }) {
         <KioskConfirmation cart={cart} products={products} orderId={placedOrderId} onReset={goHome} />
       )}
       {screen !== "welcome" && <KioskProgress step={step} />}
+
+      {showTimeoutWarning && (
+        <div className="timeout-overlay" onPointerDown={e => e.stopPropagation()}>
+          <div className="timeout-circle">{timeoutCountdown}</div>
+          <div className="timeout-heading">Still there?</div>
+          <div className="timeout-sub">Your session will reset in {timeoutCountdown} seconds due to inactivity.</div>
+          <button className="btn-primary" style={{ marginTop: 8 }} onClick={dismissTimeout}>
+            Yes, continue shopping
+          </button>
+          <button className="btn-sm btn-outline" onClick={goHome}>
+            Start over
+          </button>
+        </div>
+      )}
     </div>
   );
 }
