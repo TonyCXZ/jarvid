@@ -1054,33 +1054,112 @@ function ManagerView() {
   const [searchQ, setSearchQ] = useState("");
   const [products, setProducts] = useState([]);
   const [loadingProducts, setLoadingProducts] = useState(false);
+  const [overview, setOverview] = useState(null);
+  const [loadingOverview, setLoadingOverview] = useState(true);
+  const [weeklySales, setWeeklySales] = useState([]);
+  const [topProducts, setTopProducts] = useState([]);
+  const [complianceStats, setComplianceStats] = useState(null);
+  const [complianceLog, setComplianceLog] = useState([]);
+  const [staffList, setStaffList] = useState([]);
+  const VENUE_ID = "498c51cc-46b2-41e3-84ab-1a6d48030afb";
 
   useEffect(() => {
-    if (activeSection === "products" || activeSection === "inventory") {
-      loadProducts();
-    }
+    loadOverview();
+    loadWeeklySales();
+    loadTopProducts();
+  }, []);
+
+  useEffect(() => {
+    if (activeSection === "products" || activeSection === "inventory") loadProducts();
+    if (activeSection === "compliance") loadCompliance();
+    if (activeSection === "staff") loadStaff();
   }, [activeSection]);
+
+  const loadOverview = async () => {
+    setLoadingOverview(true);
+    const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+    const yesterdayStart = new Date(todayStart); yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+
+    const [todayRes, yesterdayRes, verifyRes] = await Promise.all([
+      supabase.from("orders").select("total_pence, status").eq("venue_id", VENUE_ID).gte("created_at", todayStart.toISOString()).eq("status", "completed"),
+      supabase.from("orders").select("total_pence, status").eq("venue_id", VENUE_ID).gte("created_at", yesterdayStart.toISOString()).lt("created_at", todayStart.toISOString()).eq("status", "completed"),
+      supabase.from("age_verifications").select("result").gte("verified_at", todayStart.toISOString()),
+    ]);
+
+    const todayOrders = todayRes.data || [];
+    const yesterdayOrders = yesterdayRes.data || [];
+    const verifications = verifyRes.data || [];
+
+    const todayRevenue = todayOrders.reduce((s, o) => s + (o.total_pence || 0), 0);
+    const yesterdayRevenue = yesterdayOrders.reduce((s, o) => s + (o.total_pence || 0), 0);
+    const todayCount = todayOrders.length;
+    const yesterdayCount = yesterdayOrders.length;
+    const avgOrder = todayCount > 0 ? todayRevenue / todayCount : 0;
+    const prevAvg = yesterdayCount > 0 ? yesterdayRevenue / yesterdayCount : 0;
+    const passCount = verifications.filter(v => v.result === "pass").length;
+    const passRate = verifications.length > 0 ? Math.round((passCount / verifications.length) * 100) : 100;
+    const revDelta = yesterdayRevenue > 0 ? Math.round(((todayRevenue - yesterdayRevenue) / yesterdayRevenue) * 100) : 0;
+
+    setOverview({ todayRevenue, todayCount, avgOrder, prevAvg, verifications: verifications.length, passRate, revDelta, countDelta: todayCount - yesterdayCount });
+    setLoadingOverview(false);
+  };
+
+  const loadWeeklySales = async () => {
+    const days = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate() - i);
+      const next = new Date(d); next.setDate(next.getDate() + 1);
+      const { data } = await supabase.from("orders").select("total_pence").eq("venue_id", VENUE_ID).eq("status", "completed").gte("created_at", d.toISOString()).lt("created_at", next.toISOString());
+      const total = (data || []).reduce((s, o) => s + (o.total_pence || 0), 0);
+      days.push({ day: d.toLocaleDateString("en-GB", { weekday: "short" }), sales: penceToGBP(total) });
+    }
+    setWeeklySales(days);
+  };
+
+  const loadTopProducts = async () => {
+    const { data } = await supabase.from("order_items").select("product_id, quantity, unit_price_pence, products(name, brand, image_url, category)").order("quantity", { ascending: false });
+    if (!data) return;
+    const map = {};
+    data.forEach(item => {
+      const id = item.product_id;
+      if (!map[id]) map[id] = { ...item.products, id, units: 0, revenue: 0 };
+      map[id].units += item.quantity;
+      map[id].revenue += item.quantity * item.unit_price_pence;
+    });
+    const sorted = Object.values(map).sort((a, b) => b.units - a.units).slice(0, 8);
+    setTopProducts(sorted);
+  };
 
   const loadProducts = async () => {
     setLoadingProducts(true);
-    const { data, error } = await supabase
-      .from("products")
-      .select(`*, inventory(quantity)`)
-      .order("brand", { ascending: true });
-    if (!error) {
-      setProducts((data || []).map(p => ({
-        ...p,
-        stock: p.inventory?.[0]?.quantity ?? 0,
-        price: penceToGBP(p.price_pence),
-      })));
-    }
+    const { data } = await supabase.from("products").select("*, inventory(quantity)").eq("venue_id", VENUE_ID).order("brand");
+    if (data) setProducts(data.map(p => ({ ...p, stock: p.inventory?.[0]?.quantity ?? 0, price: penceToGBP(p.price_pence) })));
     setLoadingProducts(false);
+  };
+
+  const loadCompliance = async () => {
+    const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+    const [statsRes, logRes] = await Promise.all([
+      supabase.from("age_verifications").select("result").gte("verified_at", todayStart.toISOString()),
+      supabase.from("age_verifications").select("method, result, user_token_hash, verified_at").order("verified_at", { ascending: false }).limit(20),
+    ]);
+    const all = statsRes.data || [];
+    const passes = all.filter(v => v.result === "pass").length;
+    setComplianceStats({ total: all.length, passes, fails: all.length - passes, passRate: all.length > 0 ? Math.round((passes / all.length) * 100) : 100 });
+    setComplianceLog(logRes.data || []);
+  };
+
+  const loadStaff = async () => {
+    const { data } = await supabase.from("staff_users").select("*").eq("venue_id", VENUE_ID).order("role");
+    setStaffList(data || []);
   };
 
   const filteredProducts = products.filter(p =>
     p.name.toLowerCase().includes(searchQ.toLowerCase()) ||
     (p.brand || "").toLowerCase().includes(searchQ.toLowerCase())
   );
+
+  const maxWeeklySale = Math.max(...weeklySales.map(d => d.sales), 1);
 
   const navItems = [
     { id: "overview",   icon: "📊", label: "Overview" },
@@ -1111,34 +1190,63 @@ function ManagerView() {
           <>
             <div>
               <div className="section-title">TODAY'S OVERVIEW</div>
-              <div className="section-sub">Tuesday, 10 March 2026</div>
+              <div className="section-sub">{new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</div>
             </div>
-            <div className="stats-row">
-              {[
-                { label: "Today's Revenue", value: "£342", delta: "↑ 18% vs yesterday", up: true },
-                { label: "Orders", value: "47", delta: "↑ 12 orders", up: true },
-                { label: "Avg Order Value", value: "£7.28", delta: "↓ £0.40", up: false },
-                { label: "Age Verifications", value: "51", delta: "100% compliance", neutral: true },
-                { label: "Kiosk Uptime", value: "99.9%", delta: "↑ 2 kiosks online", up: true },
-              ].map(s => (
-                <div key={s.label} className="stat-card">
-                  <div className="stat-label">{s.label}</div>
-                  <div className="stat-value">{s.value}</div>
-                  <div className={`stat-delta ${s.neutral ? "" : s.up ? "delta-up" : "delta-down"}`} style={s.neutral ? { color: DS.colors.textSub } : {}}>{s.delta}</div>
+            {loadingOverview ? (
+              <div style={{ display: "flex", justifyContent: "center", padding: 40 }}><div className="spinner" /></div>
+            ) : overview && (
+              <div className="stats-row">
+                <div className="stat-card">
+                  <div className="stat-label">Today's Revenue</div>
+                  <div className="stat-value">{fmt(penceToGBP(overview.todayRevenue))}</div>
+                  <div className={`stat-delta ${overview.revDelta >= 0 ? "delta-up" : "delta-down"}`}>{overview.revDelta >= 0 ? "↑" : "↓"} {Math.abs(overview.revDelta)}% vs yesterday</div>
                 </div>
-              ))}
-            </div>
+                <div className="stat-card">
+                  <div className="stat-label">Orders Today</div>
+                  <div className="stat-value">{overview.todayCount}</div>
+                  <div className={`stat-delta ${overview.countDelta >= 0 ? "delta-up" : "delta-down"}`}>{overview.countDelta >= 0 ? "↑" : "↓"} {Math.abs(overview.countDelta)} vs yesterday</div>
+                </div>
+                <div className="stat-card">
+                  <div className="stat-label">Avg Order Value</div>
+                  <div className="stat-value">{fmt(penceToGBP(overview.avgOrder))}</div>
+                  <div className={`stat-delta ${overview.avgOrder >= overview.prevAvg ? "delta-up" : "delta-down"}`}>{overview.avgOrder >= overview.prevAvg ? "↑" : "↓"} vs yesterday</div>
+                </div>
+                <div className="stat-card">
+                  <div className="stat-label">Age Verifications</div>
+                  <div className="stat-value">{overview.verifications}</div>
+                  <div className="stat-delta" style={{ color: overview.passRate === 100 ? DS.colors.accent : DS.colors.warn }}>{overview.passRate}% pass rate</div>
+                </div>
+              </div>
+            )}
             <div className="chart-card">
-              <div className="chart-title">Weekly Sales (£)</div>
+              <div className="chart-title">Last 7 Days Sales (£)</div>
               <div className="bar-chart">
-                {SALES_DATA.map(d => (
+                {weeklySales.map(d => (
                   <div key={d.day} className="bar-col">
-                    <div className="bar-val">{d.sales}</div>
-                    <div className="bar-fill" style={{ height: `${(d.sales / maxSale) * 80}px` }} />
+                    <div className="bar-val">{d.sales.toFixed(0)}</div>
+                    <div className="bar-fill" style={{ height: `${(d.sales / maxWeeklySale) * 80}px` }} />
                     <div className="bar-label">{d.day}</div>
                   </div>
                 ))}
               </div>
+            </div>
+            <div className="chart-card">
+              <div className="chart-title">Top Products by Units Sold</div>
+              <table className="data-table">
+                <thead><tr><th>Product</th><th>Units Sold</th><th>Revenue</th></tr></thead>
+                <tbody>
+                  {topProducts.map(p => (
+                    <tr key={p.id}>
+                      <td style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <ProductImage imageUrl={p.image_url} name={p.name} size="row" />
+                        <span>{p.name}<br /><span style={{ fontSize: 11, color: DS.colors.textMuted }}>{p.brand}</span></span>
+                      </td>
+                      <td style={{ color: DS.colors.white, fontWeight: 600 }}>{p.units}</td>
+                      <td style={{ color: DS.colors.accent, fontFamily: DS.font.display, fontSize: 16 }}>{fmt(penceToGBP(p.revenue))}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </>
         )}
@@ -1238,31 +1346,27 @@ function ManagerView() {
               <div className="section-title">COMPLIANCE LOG</div>
               <div className="section-sub">GDPR-compliant anonymised age verification records</div>
             </div>
-            <div className="stats-row">
-              {[
-                { label: "Verifications Today", value: "51" },
-                { label: "Pass Rate", value: "94%", color: DS.colors.accent },
-                { label: "Failed / Blocked", value: "3", color: DS.colors.danger },
-              ].map(s => (
-                <div key={s.label} className="stat-card">
-                  <div className="stat-label">{s.label}</div>
-                  <div className="stat-value" style={s.color ? { color: s.color } : {}}>{s.value}</div>
-                </div>
-              ))}
-            </div>
+            {complianceStats && (
+              <div className="stats-row">
+                <div className="stat-card"><div className="stat-label">Verifications Today</div><div className="stat-value">{complianceStats.total}</div></div>
+                <div className="stat-card"><div className="stat-label">Pass Rate</div><div className="stat-value" style={{ color: DS.colors.accent }}>{complianceStats.passRate}%</div></div>
+                <div className="stat-card"><div className="stat-label">Failed / Blocked</div><div className="stat-value" style={{ color: DS.colors.danger }}>{complianceStats.fails}</div></div>
+              </div>
+            )}
             <div className="chart-card">
               <div className="chart-title">Verification Events (anonymised)</div>
               <div style={{ fontSize: 12, color: DS.colors.textMuted, marginBottom: 12 }}>No personal data is stored. User identifiers are one-way hashed tokens.</div>
               <div className="compliance-log">
-                {COMPLIANCE_LOG.map((entry, i) => (
+                {complianceLog.map((entry, i) => (
                   <div key={i} className="log-entry">
                     <div className={`log-dot ${entry.result === "pass" ? "log-dot-pass" : "log-dot-fail"}`} />
-                    <div className="log-time">{entry.time}</div>
-                    <div className="log-method">{entry.method}</div>
+                    <div className="log-time">{new Date(entry.verified_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}</div>
+                    <div className="log-method">{(entry.method || "").replace(/_/g, " ")}</div>
                     <div className={entry.result === "pass" ? "log-result-pass" : "log-result-fail"}>{entry.result === "pass" ? "✓ PASS" : "✗ FAIL"}</div>
-                    <div className="log-anon">{entry.anon}</div>
+                    <div className="log-anon">{entry.user_token_hash || "anon"}</div>
                   </div>
                 ))}
+                {complianceLog.length === 0 && <div style={{ textAlign: "center", padding: 40, color: DS.colors.textMuted }}>No verifications recorded today</div>}
               </div>
             </div>
           </>
@@ -1272,31 +1376,26 @@ function ManagerView() {
           <>
             <div>
               <div className="section-title">STAFF MANAGEMENT</div>
-              <div className="section-sub">Manage staff accounts and permissions</div>
+              <div className="section-sub">Live from database · {staffList.length} accounts</div>
             </div>
             <div className="chart-card">
               <table className="data-table">
-                <thead><tr><th>Name</th><th>Role</th><th>Status</th><th>Last Active</th><th>Actions</th></tr></thead>
+                <thead><tr><th>Email</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead>
                 <tbody>
-                  {[
-                    { name: "Sarah Mitchell", role: "Manager", status: "online", last: "Now" },
-                    { name: "Jake Thompson", role: "Staff", status: "online", last: "Now" },
-                    { name: "Emma Clarke", role: "Staff", status: "offline", last: "1h ago" },
-                    { name: "Ryan Foster", role: "Staff", status: "offline", last: "Yesterday" },
-                  ].map((s, i) => (
-                    <tr key={i}>
-                      <td>{s.name}</td>
+                  {staffList.map((s) => (
+                    <tr key={s.id}>
+                      <td>{s.email}</td>
                       <td><span className="tag-pill" style={{ background: "rgba(124,92,191,0.15)", color: DS.colors.purple }}>{s.role}</span></td>
                       <td>
                         <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <span style={{ width: 8, height: 8, borderRadius: "50%", background: s.status === "online" ? DS.colors.accent : DS.colors.textMuted, display: "inline-block" }} />
-                          {s.status}
+                          <span style={{ width: 8, height: 8, borderRadius: "50%", background: s.is_active ? DS.colors.accent : DS.colors.textMuted, display: "inline-block" }} />
+                          {s.is_active ? "Active" : "Inactive"}
                         </span>
                       </td>
-                      <td>{s.last}</td>
                       <td><button className="btn-sm btn-outline">Edit</button></td>
                     </tr>
                   ))}
+                  {staffList.length === 0 && <tr><td colSpan={4} style={{ textAlign: "center", color: DS.colors.textMuted }}>No staff accounts found</td></tr>}
                 </tbody>
               </table>
             </div>
