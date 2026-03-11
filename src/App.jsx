@@ -2326,12 +2326,7 @@ export default function App() {
   const logoTapTimer = useRef(null);
   const [kioskPin, setKioskPin] = useState(null);
   const [kioskVenueId, setKioskVenueId] = useState(null);
-  const [showStaffTimeout, setShowStaffTimeout] = useState(false);
-  const [staffTimeoutCountdown, setStaffTimeoutCountdown] = useState(30);
-  const staffInactivityTimer = useRef(null);
-  const staffCountdownTimer = useRef(null);
-  const STAFF_INACTIVITY_SECONDS = 120;
-  const STAFF_WARNING_SECONDS = 30;
+
 
   // Load kiosk PIN — falls back to "1234" on any error
   useEffect(() => {
@@ -2445,9 +2440,6 @@ export default function App() {
   };
 
   const handleLogout = async () => {
-    clearTimeout(staffInactivityTimer.current);
-    clearInterval(staffCountdownTimer.current);
-    setShowStaffTimeout(false);
     await supabase.auth.signOut();
     setUser(null);
     if (isStaffMode) {
@@ -2462,54 +2454,13 @@ export default function App() {
     }
   };
 
-  const resetStaffTimer = useCallback(() => {
-    if (!user || kioskLocked) return;
-    clearTimeout(staffInactivityTimer.current);
-    staffInactivityTimer.current = setTimeout(() => {
-      setShowStaffTimeout(true);
-      setStaffTimeoutCountdown(STAFF_WARNING_SECONDS);
-      staffCountdownTimer.current = setInterval(() => {
-        setStaffTimeoutCountdown(c => {
-          if (c <= 1) {
-            clearInterval(staffCountdownTimer.current);
-            handleLogout();
-            return 0;
-          }
-          return c - 1;
-        });
-      }, 1000);
-    }, STAFF_INACTIVITY_SECONDS * 1000);
-  }, [user, kioskLocked]);
 
-  const dismissStaffTimeout = () => {
-    clearInterval(staffCountdownTimer.current);
-    setShowStaffTimeout(false);
-    resetStaffTimer();
-  };
-
-  // Start/stop staff inactivity timer based on auth state
-  useEffect(() => {
-    if (user && !kioskLocked) {
-      resetStaffTimer();
-    } else {
-      clearTimeout(staffInactivityTimer.current);
-      clearInterval(staffCountdownTimer.current);
-      setShowStaffTimeout(false);
-    }
-    return () => {
-      clearTimeout(staffInactivityTimer.current);
-      clearInterval(staffCountdownTimer.current);
-    };
-  }, [user, kioskLocked]);
 
   if (!authChecked) return <><GlobalStyles /><div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "#0a0a0f" }}><div className="spinner" /></div></>;
 
   if (showLogin) return <><GlobalStyles /><LoginScreen onLogin={handleLogin} /></>;
 
-  const handleStaffActivity = () => {
-    if (showStaffTimeout || !user || kioskLocked) return;
-    resetStaffTimer();
-  };
+
 
   // Tab visibility based on role
   const isStaff = user?.role === "staff";
