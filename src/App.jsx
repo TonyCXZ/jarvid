@@ -343,6 +343,27 @@ const GlobalStyles = () => (
 const fmt = (n) => `£${Number(n).toFixed(2)}`;
 const uid = () => "ORD-" + Math.random().toString(36).substr(2, 4).toUpperCase();
 const penceToGBP = (p) => p / 100;
+
+// Profit calculation helpers
+// gross profit = retail - supply price (ex VAT)
+// venue share = gross profit * (1 - jarvid_pct/100)
+// jarvid share = gross profit * (jarvid_pct/100)
+const calcProfit = (items, jarvidPct = 20) => {
+  let grossProfit = 0;
+  let totalRevenue = 0;
+  let totalSupply = 0;
+  (items || []).forEach(item => {
+    const qty = item.quantity || 1;
+    const retail = item.unit_price_pence || 0;
+    const supply = item.products?.supply_price_pence || 0;
+    totalRevenue += retail * qty;
+    totalSupply += supply * qty;
+    grossProfit += (retail - supply) * qty;
+  });
+  const jarvidShare = Math.round(grossProfit * (jarvidPct / 100));
+  const venueShare = grossProfit - jarvidShare;
+  return { totalRevenue, totalSupply, grossProfit, jarvidShare, venueShare };
+};
 const GBPtoPence = (p) => Math.round(p * 100);
 
 // ============================================================
@@ -1344,6 +1365,7 @@ function ManagerView({ user }) {
   const [loadingDayDetail, setLoadingDayDetail] = useState(false);
   const [analyticsView, setAnalyticsView] = useState("weekly");
   const [kioskStatuses, setKioskStatuses] = useState([]);
+  const [jarvidPct, setJarvidPct] = useState(20);
   const [analyticsData, setAnalyticsData] = useState([]);
   const [loadingAnalytics, setLoadingAnalytics] = useState(false);
   const [analyticsSelected, setAnalyticsSelected] = useState(null);
@@ -1385,6 +1407,9 @@ function ManagerView({ user }) {
     if (!VENUE_ID) return;
     loadOverview();
     loadKiosks().then(setKioskStatuses);
+    // Load venue profit share %
+    supabase.from("venues").select("jarvid_profit_share_pct").eq("id", VENUE_ID).single()
+      .then(({ data }) => { if (data) setJarvidPct(data.jarvid_profit_share_pct || 20); });
     loadWeeklySales();
     loadTopProducts();
   }, [VENUE_ID]);
@@ -1421,15 +1446,20 @@ function ManagerView({ user }) {
     const todayStart = new Date(); todayStart.setHours(0,0,0,0);
     const yesterdayStart = new Date(todayStart); yesterdayStart.setDate(yesterdayStart.getDate() - 1);
 
-    const [todayRes, yesterdayRes, verifyRes] = await Promise.all([
-      supabase.from("orders").select("total_pence, status").eq("venue_id", VENUE_ID).gte("created_at", todayStart.toISOString()).eq("status", "completed"),
-      supabase.from("orders").select("total_pence, status").eq("venue_id", VENUE_ID).gte("created_at", yesterdayStart.toISOString()).lt("created_at", todayStart.toISOString()).eq("status", "completed"),
+    const [todayOrdersRes, yesterdayOrdersRes, todayItemsRes, yesterdayItemsRes, verifyRes, venueRes] = await Promise.all([
+      supabase.from("orders").select("id, total_pence, status").eq("venue_id", VENUE_ID).gte("created_at", todayStart.toISOString()).eq("status", "completed"),
+      supabase.from("orders").select("id, total_pence, status").eq("venue_id", VENUE_ID).gte("created_at", yesterdayStart.toISOString()).lt("created_at", todayStart.toISOString()).eq("status", "completed"),
+      supabase.from("order_items").select("quantity, unit_price_pence, products(supply_price_pence), orders!inner(venue_id, created_at, status)").eq("orders.venue_id", VENUE_ID).eq("orders.status", "completed").gte("orders.created_at", todayStart.toISOString()),
+      supabase.from("order_items").select("quantity, unit_price_pence, products(supply_price_pence), orders!inner(venue_id, created_at, status)").eq("orders.venue_id", VENUE_ID).eq("orders.status", "completed").gte("orders.created_at", yesterdayStart.toISOString()).lt("orders.created_at", todayStart.toISOString()),
       supabase.from("age_verifications").select("result").gte("verified_at", todayStart.toISOString()),
+      supabase.from("venues").select("jarvid_profit_share_pct").eq("id", VENUE_ID).single(),
     ]);
 
-    const todayOrders = todayRes.data || [];
-    const yesterdayOrders = yesterdayRes.data || [];
+    const todayOrders = todayOrdersRes.data || [];
+    const yesterdayOrders = yesterdayOrdersRes.data || [];
     const verifications = verifyRes.data || [];
+    const pct = venueRes.data?.jarvid_profit_share_pct || 20;
+    setJarvidPct(pct);
 
     const todayRevenue = todayOrders.reduce((s, o) => s + (o.total_pence || 0), 0);
     const yesterdayRevenue = yesterdayOrders.reduce((s, o) => s + (o.total_pence || 0), 0);
@@ -1441,7 +1471,11 @@ function ManagerView({ user }) {
     const passRate = verifications.length > 0 ? Math.round((passCount / verifications.length) * 100) : 100;
     const revDelta = yesterdayRevenue > 0 ? Math.round(((todayRevenue - yesterdayRevenue) / yesterdayRevenue) * 100) : 0;
 
-    setOverview({ todayRevenue, todayCount, avgOrder, prevAvg, verifications: verifications.length, passRate, revDelta, countDelta: todayCount - yesterdayCount });
+    const todayProfit = calcProfit(todayItemsRes.data || [], pct);
+    const yesterdayProfit = calcProfit(yesterdayItemsRes.data || [], pct);
+    const profitDelta = yesterdayProfit.venueShare > 0 ? Math.round(((todayProfit.venueShare - yesterdayProfit.venueShare) / yesterdayProfit.venueShare) * 100) : 0;
+
+    setOverview({ todayRevenue, todayCount, avgOrder, prevAvg, verifications: verifications.length, passRate, revDelta, countDelta: todayCount - yesterdayCount, todayProfit, profitDelta });
     setLoadingOverview(false);
   };
 
@@ -1627,50 +1661,72 @@ function ManagerView({ user }) {
     setAnalyticsView(view);
     setAnalyticsSelected(null);
 
-    const { data: orders } = await supabase
-      .from("orders")
-      .select("total_pence, status, created_at")
-      .eq("venue_id", VENUE_ID)
-      .eq("status", "completed")
-      .order("created_at", { ascending: true });
+    const [ordersRes, itemsRes] = await Promise.all([
+      supabase.from("orders").select("id, total_pence, status, created_at").eq("venue_id", VENUE_ID).eq("status", "completed").order("created_at", { ascending: true }),
+      supabase.from("order_items").select("quantity, unit_price_pence, products(supply_price_pence), orders!inner(id, venue_id, status, created_at)").eq("orders.venue_id", VENUE_ID).eq("orders.status", "completed"),
+    ]);
 
-    const allOrders = orders || [];
+    const allOrders = ordersRes.data || [];
+    const allItems = itemsRes.data || [];
+
+    // Build a map of order_id → items for profit lookup
+    const itemsByOrder = {};
+    allItems.forEach(item => {
+      const oid = item.orders?.id;
+      if (!oid) return;
+      if (!itemsByOrder[oid]) itemsByOrder[oid] = [];
+      itemsByOrder[oid].push(item);
+    });
+
+    const getPeriodProfit = (orderIds) => {
+      const items = orderIds.flatMap(id => itemsByOrder[id] || []);
+      return calcProfit(items, jarvidPct);
+    };
 
     if (view === "weekly") {
-      // Group by ISO week
       const weekMap = {};
       allOrders.forEach(o => {
         const d = new Date(o.created_at);
         const startOfWeek = new Date(d);
-        startOfWeek.setDate(d.getDate() - d.getDay() + 1); // Monday
+        startOfWeek.setDate(d.getDate() - d.getDay() + 1);
         startOfWeek.setHours(0,0,0,0);
         const key = startOfWeek.toISOString().slice(0,10);
-        if (!weekMap[key]) weekMap[key] = { key, label: startOfWeek.toLocaleDateString("en-GB", { day: "numeric", month: "short" }), revenue: 0, orders: 0, startDate: new Date(startOfWeek) };
+        if (!weekMap[key]) weekMap[key] = { key, label: startOfWeek.toLocaleDateString("en-GB", { day: "numeric", month: "short" }), revenue: 0, orders: 0, orderIds: [], startDate: new Date(startOfWeek) };
         weekMap[key].revenue += o.total_pence || 0;
         weekMap[key].orders += 1;
+        weekMap[key].orderIds.push(o.id);
       });
       const weeks = Object.values(weekMap).sort((a, b) => a.startDate - b.startDate);
-      // Add wow (week-over-week) change
       weeks.forEach((w, i) => {
+        const profit = getPeriodProfit(w.orderIds);
+        w.venueProfit = profit.venueShare;
+        w.jarvidProfit = profit.jarvidShare;
         w.prev = i > 0 ? weeks[i-1].revenue : null;
+        w.prevProfit = i > 0 ? weeks[i-1].venueProfit : null;
         w.change = w.prev ? Math.round(((w.revenue - w.prev) / w.prev) * 100) : null;
+        w.profitChange = w.prevProfit ? Math.round(((w.venueProfit - w.prevProfit) / w.prevProfit) * 100) : null;
       });
       setAnalyticsData(weeks);
     } else {
-      // Group by month
       const monthMap = {};
       allOrders.forEach(o => {
         const d = new Date(o.created_at);
         const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
         const label = d.toLocaleDateString("en-GB", { month: "short", year: "numeric" });
-        if (!monthMap[key]) monthMap[key] = { key, label, revenue: 0, orders: 0, sortKey: key };
+        if (!monthMap[key]) monthMap[key] = { key, label, revenue: 0, orders: 0, orderIds: [], sortKey: key };
         monthMap[key].revenue += o.total_pence || 0;
         monthMap[key].orders += 1;
+        monthMap[key].orderIds.push(o.id);
       });
       const months = Object.values(monthMap).sort((a, b) => a.sortKey.localeCompare(b.sortKey));
       months.forEach((m, i) => {
+        const profit = getPeriodProfit(m.orderIds);
+        m.venueProfit = profit.venueShare;
+        m.jarvidProfit = profit.jarvidShare;
         m.prev = i > 0 ? months[i-1].revenue : null;
+        m.prevProfit = i > 0 ? months[i-1].venueProfit : null;
         m.change = m.prev ? Math.round(((m.revenue - m.prev) / m.prev) * 100) : null;
+        m.profitChange = m.prevProfit ? Math.round(((m.venueProfit - m.prevProfit) / m.prevProfit) * 100) : null;
       });
       setAnalyticsData(months);
     }
@@ -1767,14 +1823,14 @@ function ManagerView({ user }) {
                   <div className={`stat-delta ${overview.revDelta >= 0 ? "delta-up" : "delta-down"}`}>{overview.revDelta >= 0 ? "↑" : "↓"} {Math.abs(overview.revDelta)}% vs yesterday</div>
                 </div>
                 <div className="stat-card">
+                  <div className="stat-label">Your Profit (ex VAT)</div>
+                  <div className="stat-value" style={{ color: DS.colors.accent }}>{overview.todayProfit ? fmt(penceToGBP(overview.todayProfit.venueShare)) : "—"}</div>
+                  <div className={`stat-delta ${(overview.profitDelta || 0) >= 0 ? "delta-up" : "delta-down"}`}>{(overview.profitDelta || 0) >= 0 ? "↑" : "↓"} {Math.abs(overview.profitDelta || 0)}% vs yesterday</div>
+                </div>
+                <div className="stat-card">
                   <div className="stat-label">Orders Today</div>
                   <div className="stat-value">{overview.todayCount}</div>
                   <div className={`stat-delta ${overview.countDelta >= 0 ? "delta-up" : "delta-down"}`}>{overview.countDelta >= 0 ? "↑" : "↓"} {Math.abs(overview.countDelta)} vs yesterday</div>
-                </div>
-                <div className="stat-card">
-                  <div className="stat-label">Avg Order Value</div>
-                  <div className="stat-value">{fmt(penceToGBP(overview.avgOrder))}</div>
-                  <div className={`stat-delta ${overview.avgOrder >= overview.prevAvg ? "delta-up" : "delta-down"}`}>{overview.avgOrder >= overview.prevAvg ? "↑" : "↓"} vs yesterday</div>
                 </div>
                 <div className="stat-card">
                   <div className="stat-label">Age Verifications</div>
@@ -1931,12 +1987,13 @@ function ManagerView({ user }) {
                       <div className="stat-value" style={{ fontSize: 20 }}>{fmt(penceToGBP(totalRevenue))}</div>
                     </div>
                     <div className="stat-card">
-                      <div className="stat-label">All-time Orders</div>
-                      <div className="stat-value" style={{ fontSize: 20 }}>{totalOrders}</div>
+                      <div className="stat-label">Your All-time Profit</div>
+                      <div className="stat-value" style={{ fontSize: 20, color: DS.colors.accent }}>{fmt(penceToGBP(analyticsData.reduce((s, d) => s + (d.venueProfit || 0), 0)))}</div>
+                      <div className="stat-sub" style={{ fontSize: 10, color: DS.colors.textMuted }}>ex VAT · {100 - jarvidPct}% share</div>
                     </div>
                     <div className="stat-card">
-                      <div className="stat-label">Avg per {analyticsView === "weekly" ? "Week" : "Month"}</div>
-                      <div className="stat-value" style={{ fontSize: 20 }}>{fmt(penceToGBP(avgPerPeriod))}</div>
+                      <div className="stat-label">All-time Orders</div>
+                      <div className="stat-value" style={{ fontSize: 20 }}>{totalOrders}</div>
                     </div>
                     <div className="stat-card">
                       <div className="stat-label">Best {analyticsView === "weekly" ? "Week" : "Month"}</div>
@@ -1976,8 +2033,8 @@ function ManagerView({ user }) {
                         <tr>
                           <th>{analyticsView === "weekly" ? "Week of" : "Month"}</th>
                           <th>Revenue</th>
+                          <th>Your Profit (ex VAT)</th>
                           <th>Orders</th>
-                          <th>Avg Order</th>
                           <th>vs Previous</th>
                         </tr>
                       </thead>
@@ -1987,14 +2044,14 @@ function ManagerView({ user }) {
                             onClick={() => setAnalyticsSelected(analyticsSelected?.key === d.key ? null : d)}
                             style={{ cursor: "pointer", background: analyticsSelected?.key === d.key ? "rgba(124,92,191,0.1)" : "transparent" }}>
                             <td style={{ fontWeight: analyticsSelected?.key === d.key ? 700 : 400 }}>{d.label}</td>
-                            <td style={{ color: DS.colors.accent, fontFamily: DS.font.display, fontSize: 15 }}>{fmt(penceToGBP(d.revenue))}</td>
+                            <td style={{ color: DS.colors.textSub, fontFamily: DS.font.display, fontSize: 15 }}>{fmt(penceToGBP(d.revenue))}</td>
+                            <td style={{ color: DS.colors.accent, fontFamily: DS.font.display, fontSize: 15 }}>{fmt(penceToGBP(d.venueProfit || 0))}</td>
                             <td>{d.orders}</td>
-                            <td>{d.orders > 0 ? fmt(penceToGBP(d.revenue / d.orders)) : "—"}</td>
                             <td>
-                              {d.change === null ? <span style={{ color: DS.colors.textMuted }}>—</span>
-                                : d.change >= 0
-                                  ? <span style={{ color: DS.colors.accent }}>↑ {d.change}%</span>
-                                  : <span style={{ color: DS.colors.danger }}>↓ {Math.abs(d.change)}%</span>
+                              {d.profitChange === null ? <span style={{ color: DS.colors.textMuted }}>—</span>
+                                : d.profitChange >= 0
+                                  ? <span style={{ color: DS.colors.accent }}>↑ {d.profitChange}%</span>
+                                  : <span style={{ color: DS.colors.danger }}>↓ {Math.abs(d.profitChange)}%</span>
                               }
                             </td>
                           </tr>
@@ -2012,12 +2069,12 @@ function ManagerView({ user }) {
                       </div>
                       <div className="stats-row">
                         <div className="stat-card"><div className="stat-label">Revenue</div><div className="stat-value" style={{ fontSize: 20 }}>{fmt(penceToGBP(analyticsSelected.revenue))}</div></div>
+                        <div className="stat-card"><div className="stat-label">Your Profit (ex VAT)</div><div className="stat-value" style={{ fontSize: 20, color: DS.colors.accent }}>{fmt(penceToGBP(analyticsSelected.venueProfit || 0))}</div><div className="stat-sub" style={{ fontSize: 10, color: DS.colors.textMuted }}>{100 - jarvidPct}% of gross profit</div></div>
                         <div className="stat-card"><div className="stat-label">Orders</div><div className="stat-value" style={{ fontSize: 20 }}>{analyticsSelected.orders}</div></div>
-                        <div className="stat-card"><div className="stat-label">Avg Order</div><div className="stat-value" style={{ fontSize: 20 }}>{analyticsSelected.orders > 0 ? fmt(penceToGBP(analyticsSelected.revenue / analyticsSelected.orders)) : "—"}</div></div>
                         <div className="stat-card">
-                          <div className="stat-label">vs Previous {analyticsView === "weekly" ? "Week" : "Month"}</div>
-                          <div className="stat-value" style={{ fontSize: 20, color: analyticsSelected.change === null ? DS.colors.textMuted : analyticsSelected.change >= 0 ? DS.colors.accent : DS.colors.danger }}>
-                            {analyticsSelected.change === null ? "—" : `${analyticsSelected.change >= 0 ? "↑" : "↓"} ${Math.abs(analyticsSelected.change)}%`}
+                          <div className="stat-label">Profit vs Previous</div>
+                          <div className="stat-value" style={{ fontSize: 20, color: analyticsSelected.profitChange === null ? DS.colors.textMuted : analyticsSelected.profitChange >= 0 ? DS.colors.accent : DS.colors.danger }}>
+                            {analyticsSelected.profitChange === null ? "—" : `${analyticsSelected.profitChange >= 0 ? "↑" : "↓"} ${Math.abs(analyticsSelected.profitChange)}%`}
                           </div>
                         </div>
                       </div>
@@ -2441,9 +2498,73 @@ function AdminView() {
   const [venues, setVenues] = useState([]);
   const [loadingVenues, setLoadingVenues] = useState(false);
 
+  const [financials, setFinancials] = useState(null);
+  const [loadingFinancials, setLoadingFinancials] = useState(false);
+
   useEffect(() => {
     if (adminSection === "venues") loadVenues();
+    if (adminSection === "financials") loadFinancials();
   }, [adminSection]);
+
+  const loadFinancials = async () => {
+    setLoadingFinancials(true);
+    // Load all venues with profit share %
+    const { data: venuesData } = await supabase.from("venues").select("id, name, jarvid_profit_share_pct");
+    // Load all completed order items with supply prices across all venues
+    const { data: items } = await supabase
+      .from("order_items")
+      .select("quantity, unit_price_pence, products(supply_price_pence, jarvid_cost_pence), orders!inner(venue_id, status, created_at)")
+      .eq("orders.status", "completed");
+
+    if (!venuesData || !items) { setLoadingFinancials(false); return; }
+
+    // Group items by venue
+    const byVenue = {};
+    items.forEach(item => {
+      const vid = item.orders?.venue_id;
+      if (!vid) return;
+      if (!byVenue[vid]) byVenue[vid] = [];
+      byVenue[vid].push(item);
+    });
+
+    // Calculate per-venue financials
+    const venueFinancials = venuesData.map(v => {
+      const vItems = byVenue[v.id] || [];
+      const pct = v.jarvid_profit_share_pct || 20;
+      let totalRevenue = 0, totalSupply = 0, totalJarvidCost = 0;
+      vItems.forEach(item => {
+        const qty = item.quantity || 1;
+        totalRevenue += (item.unit_price_pence || 0) * qty;
+        totalSupply += (item.products?.supply_price_pence || 0) * qty;
+        totalJarvidCost += (item.products?.jarvid_cost_pence || 0) * qty;
+      });
+      const grossProfit = totalRevenue - totalSupply;
+      const jarvidShare = Math.round(grossProfit * (pct / 100));
+      const venueShare = grossProfit - jarvidShare;
+      const jarvidMargin = totalSupply - totalJarvidCost; // markup revenue
+      return {
+        ...v,
+        totalRevenue,
+        grossProfit,
+        jarvidShare,
+        venueShare,
+        jarvidMargin,
+        jarvidTotal: jarvidShare + jarvidMargin, // total JarvID income = profit share + supply margin
+      };
+    });
+
+    const platform = venueFinancials.reduce((s, v) => ({
+      totalRevenue: s.totalRevenue + v.totalRevenue,
+      grossProfit: s.grossProfit + v.grossProfit,
+      jarvidShare: s.jarvidShare + v.jarvidShare,
+      venueShare: s.venueShare + v.venueShare,
+      jarvidMargin: s.jarvidMargin + v.jarvidMargin,
+      jarvidTotal: s.jarvidTotal + v.jarvidTotal,
+    }), { totalRevenue: 0, grossProfit: 0, jarvidShare: 0, venueShare: 0, jarvidMargin: 0, jarvidTotal: 0 });
+
+    setFinancials({ venues: venueFinancials, platform });
+    setLoadingFinancials(false);
+  };
 
   const loadVenues = async () => {
     setLoadingVenues(true);
@@ -2457,9 +2578,10 @@ function AdminView() {
   };
 
   const navItems = [
-    { id: "venues",  icon: "🏢", label: "Venues" },
-    { id: "devices", icon: "📱", label: "Devices" },
-    { id: "billing", icon: "💳", label: "Billing" },
+    { id: "venues",     icon: "🏢", label: "Venues" },
+    { id: "devices",    icon: "📱", label: "Devices" },
+    { id: "financials", icon: "💰", label: "Financials" },
+    { id: "billing",    icon: "💳", label: "Billing" },
   ];
 
   return (
@@ -2546,6 +2668,88 @@ function AdminView() {
 
         {adminSection === "devices" && (
           <DeviceMonitor venues={venues} />
+        )}
+
+        {adminSection === "financials" && (
+          <>
+            <div>
+              <div className="section-title">JARVID FINANCIALS</div>
+              <div className="section-sub">All-time platform revenue — supply margin + profit share (ex VAT)</div>
+            </div>
+            {loadingFinancials ? (
+              <div style={{ display: "flex", justifyContent: "center", padding: 40 }}><div className="spinner" /></div>
+            ) : financials && (
+              <>
+                {/* Platform totals */}
+                <div className="stats-row">
+                  <div className="stat-card">
+                    <div className="stat-label">Total Platform Revenue</div>
+                    <div className="stat-value">{fmt(penceToGBP(financials.platform.totalRevenue))}</div>
+                    <div className="stat-sub" style={{ fontSize: 11, color: DS.colors.textMuted }}>All venues combined</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-label">JarvID Supply Margin</div>
+                    <div className="stat-value" style={{ color: DS.colors.blue }}>{fmt(penceToGBP(financials.platform.jarvidMargin))}</div>
+                    <div className="stat-sub" style={{ fontSize: 11, color: DS.colors.textMuted }}>Supply price − cost price</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-label">JarvID Profit Share</div>
+                    <div className="stat-value" style={{ color: DS.colors.accent }}>{fmt(penceToGBP(financials.platform.jarvidShare))}</div>
+                    <div className="stat-sub" style={{ fontSize: 11, color: DS.colors.textMuted }}>% cut of gross profit</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-label">JarvID Total Income</div>
+                    <div className="stat-value" style={{ color: DS.colors.accent, fontFamily: DS.font.display }}>{fmt(penceToGBP(financials.platform.jarvidTotal))}</div>
+                    <div className="stat-sub" style={{ fontSize: 11, color: DS.colors.textMuted }}>Margin + profit share</div>
+                  </div>
+                </div>
+
+                {/* Per venue breakdown */}
+                <div className="chart-card" style={{ padding: 0, overflow: "hidden" }}>
+                  <div style={{ padding: "14px 16px", borderBottom: `1px solid ${DS.colors.border}` }}>
+                    <div className="chart-title" style={{ marginBottom: 0 }}>Per Venue Breakdown</div>
+                  </div>
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Venue</th>
+                        <th>Revenue</th>
+                        <th>Gross Profit</th>
+                        <th>Venue Share</th>
+                        <th>JarvID Share</th>
+                        <th>Supply Margin</th>
+                        <th>JarvID Total</th>
+                        <th>Split</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {financials.venues.map(v => (
+                        <tr key={v.id}>
+                          <td style={{ fontWeight: 600 }}>{v.name}</td>
+                          <td>{fmt(penceToGBP(v.totalRevenue))}</td>
+                          <td>{fmt(penceToGBP(v.grossProfit))}</td>
+                          <td style={{ color: DS.colors.textSub }}>{fmt(penceToGBP(v.venueShare))}</td>
+                          <td style={{ color: DS.colors.accent }}>{fmt(penceToGBP(v.jarvidShare))}</td>
+                          <td style={{ color: DS.colors.blue }}>{fmt(penceToGBP(v.jarvidMargin))}</td>
+                          <td style={{ color: DS.colors.accent, fontWeight: 700 }}>{fmt(penceToGBP(v.jarvidTotal))}</td>
+                          <td>
+                            <span className="tag-pill" style={{ background: "rgba(0,245,196,0.1)", color: DS.colors.accent, fontSize: 11 }}>
+                              {100 - (v.jarvid_profit_share_pct || 20)}/{v.jarvid_profit_share_pct || 20}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Note */}
+                <div style={{ fontSize: 12, color: DS.colors.textMuted, padding: "4px 2px" }}>
+                  All figures are ex VAT · Supply margin = venue supply price minus JarvID cost price · Profit share = JarvID % of (retail − venue supply price)
+                </div>
+              </>
+            )}
+          </>
         )}
 
         {adminSection === "billing" && (
