@@ -1293,6 +1293,15 @@ function ManagerView({ user }) {
   const [analyticsData, setAnalyticsData] = useState([]);
   const [loadingAnalytics, setLoadingAnalytics] = useState(false);
   const [analyticsSelected, setAnalyticsSelected] = useState(null);
+  const [exportLoading, setExportLoading] = useState(null);
+  const [exportRange, setExportRange] = useState(() => {
+    const end = new Date();
+    const start = new Date(); start.setDate(start.getDate() - 30);
+    return {
+      start: start.toISOString().split("T")[0],
+      end: end.toISOString().split("T")[0],
+    };
+  });
   const [pinEdit, setPinEdit] = useState("");
   const [pinSaving, setPinSaving] = useState(false);
   const [pinSaved, setPinSaved] = useState(false);
@@ -1441,6 +1450,98 @@ function ManagerView({ user }) {
     setLoadingDayDetail(false);
   };
 
+  const downloadCSV = (filename, rows, headers) => {
+    const escape = v => {
+      if (v == null) return "";
+      const s = String(v);
+      return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const csv = [headers, ...rows].map(r => r.map(escape).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportOrders = async () => {
+    setExportLoading("orders");
+    const start = new Date(exportRange.start); start.setHours(0,0,0,0);
+    const end = new Date(exportRange.end); end.setHours(23,59,59,999);
+    const { data } = await supabase
+      .from("orders")
+      .select("id, created_at, status, total_pence, payment_method, age_verification_id")
+      .eq("venue_id", VENUE_ID)
+      .gte("created_at", start.toISOString())
+      .lte("created_at", end.toISOString())
+      .order("created_at", { ascending: false });
+    const rows = (data || []).map(o => [
+      o.id,
+      new Date(o.created_at).toLocaleString("en-GB"),
+      o.status,
+      fmt(penceToGBP(o.total_pence)),
+      o.payment_method || "",
+      o.age_verification_id || "",
+    ]);
+    downloadCSV(`orders_${exportRange.start}_${exportRange.end}.csv`, rows,
+      ["Order ID", "Date & Time", "Status", "Total", "Payment Method", "Verification ID"]);
+    setExportLoading(null);
+  };
+
+  const exportProductSales = async () => {
+    setExportLoading("products");
+    const start = new Date(exportRange.start); start.setHours(0,0,0,0);
+    const end = new Date(exportRange.end); end.setHours(23,59,59,999);
+    const { data } = await supabase
+      .from("order_items")
+      .select("product_id, quantity, unit_price_pence, products(name, brand, category), orders!inner(venue_id, created_at, status)")
+      .eq("orders.venue_id", VENUE_ID)
+      .eq("orders.status", "completed")
+      .gte("orders.created_at", start.toISOString())
+      .lte("orders.created_at", end.toISOString());
+
+    // Aggregate by product
+    const map = {};
+    (data || []).forEach(item => {
+      const id = item.product_id;
+      if (!map[id]) map[id] = {
+        name: item.products?.name || "",
+        brand: item.products?.brand || "",
+        category: item.products?.category || "",
+        units: 0, revenue: 0,
+      };
+      map[id].units += item.quantity;
+      map[id].revenue += item.quantity * item.unit_price_pence;
+    });
+    const rows = Object.values(map)
+      .sort((a, b) => b.revenue - a.revenue)
+      .map(p => [p.brand, p.name, p.category, p.units, fmt(penceToGBP(p.revenue))]);
+    downloadCSV(`product_sales_${exportRange.start}_${exportRange.end}.csv`, rows,
+      ["Brand", "Product", "Category", "Units Sold", "Revenue"]);
+    setExportLoading(null);
+  };
+
+  const exportCompliance = async () => {
+    setExportLoading("compliance");
+    const start = new Date(exportRange.start); start.setHours(0,0,0,0);
+    const end = new Date(exportRange.end); end.setHours(23,59,59,999);
+    const { data } = await supabase
+      .from("age_verifications")
+      .select("id, verified_at, method, result, user_token_hash")
+      .gte("verified_at", start.toISOString())
+      .lte("verified_at", end.toISOString())
+      .order("verified_at", { ascending: false });
+    const rows = (data || []).map(v => [
+      v.id,
+      new Date(v.verified_at).toLocaleString("en-GB"),
+      v.method || "",
+      v.result || "",
+      v.user_token_hash || "",
+    ]);
+    downloadCSV(`compliance_${exportRange.start}_${exportRange.end}.csv`, rows,
+      ["Verification ID", "Date & Time", "Method", "Result", "Token Hash"]);
+    setExportLoading(null);
+  };
+
   const savePin = async () => {
     if (pinEdit.length < 4) return;
     if (!/^\d+$/.test(pinEdit)) { alert("PIN must be numbers only."); return; }
@@ -1550,6 +1651,7 @@ function ManagerView({ user }) {
     { id: "inventory",  icon: "🏭", label: "Inventory" },
     { id: "compliance", icon: "🔒", label: "Compliance" },
     { id: "staff",      icon: "👥", label: "Staff" },
+    { id: "export",     icon: "📥", label: "Export" },
     { id: "settings",   icon: "⚙️", label: "Settings" },
   ];
 
@@ -2005,6 +2107,102 @@ function ManagerView({ user }) {
                 </tbody>
               </table>
             </div>
+          </>
+        )}
+
+        {activeSection === "export" && (
+          <>
+            <div>
+              <div className="section-title">EXPORT DATA</div>
+              <div className="section-sub">Download CSV files for accounting and compliance reporting</div>
+            </div>
+
+            {/* Date range picker */}
+            <div className="chart-card" style={{ maxWidth: 520 }}>
+              <div className="chart-title" style={{ marginBottom: 16 }}>📅 Date Range</div>
+              <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+                <div>
+                  <div style={{ fontSize: 11, color: DS.colors.textMuted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>From</div>
+                  <input type="date" value={exportRange.start}
+                    onChange={e => setExportRange(r => ({ ...r, start: e.target.value }))}
+                    style={{ background: DS.colors.surface, border: `1px solid ${DS.colors.border}`, borderRadius: 8, padding: "8px 12px", color: DS.colors.text, fontSize: 14, outline: "none", cursor: "pointer" }} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: DS.colors.textMuted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>To</div>
+                  <input type="date" value={exportRange.end}
+                    onChange={e => setExportRange(r => ({ ...r, end: e.target.value }))}
+                    style={{ background: DS.colors.surface, border: `1px solid ${DS.colors.border}`, borderRadius: 8, padding: "8px 12px", color: DS.colors.text, fontSize: 14, outline: "none", cursor: "pointer" }} />
+                </div>
+                <div style={{ alignSelf: "flex-end" }}>
+                  <div style={{ fontSize: 11, color: DS.colors.textMuted, marginBottom: 6 }}>&nbsp;</div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    {[
+                      { label: "7d",  days: 7 },
+                      { label: "30d", days: 30 },
+                      { label: "90d", days: 90 },
+                    ].map(({ label, days }) => (
+                      <button key={label} className="btn-sm btn-outline" onClick={() => {
+                        const end = new Date();
+                        const start = new Date(); start.setDate(start.getDate() - days);
+                        setExportRange({ start: start.toISOString().split("T")[0], end: end.toISOString().split("T")[0] });
+                      }}>{label}</button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Export cards */}
+            {[
+              {
+                key: "orders",
+                icon: "🧾",
+                title: "Orders",
+                desc: "All orders in the date range — order ID, date, status, total, payment method and verification ID.",
+                fn: exportOrders,
+                columns: ["Order ID", "Date & Time", "Status", "Total", "Payment Method", "Verification ID"],
+              },
+              {
+                key: "products",
+                icon: "📦",
+                title: "Product Sales",
+                desc: "Aggregated sales by product for completed orders — units sold and total revenue per product.",
+                fn: exportProductSales,
+                columns: ["Brand", "Product", "Category", "Units Sold", "Revenue"],
+              },
+              {
+                key: "compliance",
+                icon: "🔒",
+                title: "Compliance Log",
+                desc: "Full age verification log — verification ID, date, method, result and anonymised token hash.",
+                fn: exportCompliance,
+                columns: ["Verification ID", "Date & Time", "Method", "Result", "Token Hash"],
+              },
+            ].map(({ key, icon, title, desc, fn, columns }) => (
+              <div key={key} className="chart-card" style={{ maxWidth: 520 }}>
+                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16 }}>
+                  <div style={{ flex: 1 }}>
+                    <div className="chart-title" style={{ marginBottom: 6 }}>{icon} {title}</div>
+                    <div style={{ fontSize: 13, color: DS.colors.textMuted, marginBottom: 12 }}>{desc}</div>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      {columns.map(col => (
+                        <span key={col} style={{ fontSize: 11, background: DS.colors.surface, border: `1px solid ${DS.colors.border}`, borderRadius: 4, padding: "2px 8px", color: DS.colors.textSub }}>
+                          {col}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <button
+                    className="btn-sm btn-accent"
+                    onClick={fn}
+                    disabled={!!exportLoading}
+                    style={{ flexShrink: 0, marginTop: 2 }}
+                  >
+                    {exportLoading === key ? "Exporting…" : "↓ Download CSV"}
+                  </button>
+                </div>
+              </div>
+            ))}
           </>
         )}
 
