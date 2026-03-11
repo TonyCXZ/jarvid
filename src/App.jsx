@@ -113,6 +113,9 @@ const GlobalStyles = () => (
     .product-card:hover { border-color: ${DS.colors.accent}; transform: translateY(-2px); background: ${DS.colors.cardHover}; }
     .product-card.in-cart { border-color: ${DS.colors.accent}; background: rgba(0,245,196,0.05); }
     .product-card.low-stock { border-color: ${DS.colors.warn}; }
+    .product-card.out-of-stock { opacity: 0.45; border-color: ${DS.colors.border}; pointer-events: none; }
+    .product-card.out-of-stock:hover { transform: none; background: ${DS.colors.card}; border-color: ${DS.colors.border}; }
+    .out-of-stock-badge { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.75); color: ${DS.colors.textMuted}; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; padding: 3px 8px; border-radius: 4px; text-transform: uppercase; }
     .popular-badge { position: absolute; top: 10px; right: 10px; padding: 2px 8px; border-radius: 4px; background: ${DS.colors.accent}; color: ${DS.colors.bg}; font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
     .product-image { width: 100%; height: 120px; object-fit: contain; border-radius: 8px; background: rgba(255,255,255,0.04); display: block; }
     .product-image-wrap { width: 100%; height: 120px; border-radius: 8px; background: rgba(255,255,255,0.04); display: flex; align-items: center; justify-content: center; overflow: hidden; }
@@ -428,7 +431,12 @@ function KioskBrowse({ cart, onAddToCart, onRemoveFromCart, onCheckout, venueId,
     loadProducts();
   }, [venueId]);
 
-  const filtered = cat === "all" ? products : products.filter(p => p.category === cat);
+  const filterBase = cat === "all" ? products : products.filter(p => p.category === cat);
+  const filtered = [...filterBase].sort((a, b) => {
+    if (a.stock === 0 && b.stock > 0) return 1;
+    if (a.stock > 0 && b.stock === 0) return -1;
+    return 0;
+  });
   const totalItems = Object.values(cart).reduce((s, q) => s + q, 0);
   const totalPrice = Object.entries(cart).reduce((s, [id, qty]) => {
     const p = products.find(x => x.id === id);
@@ -471,20 +479,29 @@ function KioskBrowse({ cart, onAddToCart, onRemoveFromCart, onCheckout, venueId,
             )}
             {filtered.map(p => {
               const inCart = cart[p.id] || 0;
-              const lowStock = p.stock < 5;
+              const outOfStock = p.stock === 0;
+              const lowStock = !outOfStock && p.stock < 5;
               return (
-                <div key={p.id} className={`product-card ${inCart > 0 ? "in-cart" : ""} ${lowStock ? "low-stock" : ""}`}>
-                  {p.popular && <div className="popular-badge">HOT</div>}
+                <div key={p.id} className={`product-card ${inCart > 0 ? "in-cart" : ""} ${lowStock ? "low-stock" : ""} ${outOfStock ? "out-of-stock" : ""}`}>
+                  {outOfStock
+                    ? <div className="out-of-stock-badge">Out of Stock</div>
+                    : p.popular && <div className="popular-badge">HOT</div>
+                  }
                   <ProductImage imageUrl={p.image_url} name={p.name} size="card" />
                   <div className="product-brand">{p.brand}</div>
                   <div className="product-name">{p.name}</div>
                   {p.flavour && <div className="product-flavour">{p.flavour}</div>}
                   {p.nicotine_mg && p.nicotine_mg !== "N/A" && <div className="product-nic">{p.nicotine_mg}</div>}
-                  <div className="product-price">{fmt(p.price)}</div>
+                  <div className="product-price" style={{ color: outOfStock ? DS.colors.textMuted : DS.colors.accent }}>{fmt(p.price)}</div>
                   <div className="product-stock">
-                    {lowStock ? <span className="low-stock-tag">⚠ Only {p.stock} left</span> : <span>{p.stock} in stock</span>}
+                    {outOfStock
+                      ? <span style={{ color: DS.colors.textMuted }}>Unavailable</span>
+                      : lowStock
+                        ? <span className="low-stock-tag">⚠ Only {p.stock} left</span>
+                        : <span>{p.stock} in stock</span>
+                    }
                   </div>
-                  {inCart > 0 ? (
+                  {!outOfStock && (inCart > 0 ? (
                     <div className="product-qty-row">
                       <button className="product-qty-btn minus" onClick={e => { e.stopPropagation(); onRemoveFromCart(p.id); }}>−</button>
                       <div className="product-qty-num">{inCart}</div>
@@ -492,7 +509,7 @@ function KioskBrowse({ cart, onAddToCart, onRemoveFromCart, onCheckout, venueId,
                     </div>
                   ) : (
                     <button className="product-add-btn" onClick={e => { e.stopPropagation(); onAddToCart(p.id); }}>+</button>
-                  )}
+                  ))}
                 </div>
               );
             })}
@@ -676,7 +693,22 @@ function KioskPayment({ cart, products, onPaid, verificationId, kioskId, venueId
 
   const createOrder = async () => {
     try {
-      // 1. Create order record
+      // 1. Check stock levels before proceeding
+      const cartItems = Object.entries(cart);
+      for (const [id, qty] of cartItems) {
+        const { data: inv } = await supabase
+          .from("inventory")
+          .select("quantity")
+          .eq("product_id", id)
+          .eq("venue_id", venueId)
+          .single();
+        if (!inv || inv.quantity < qty) {
+          const p = products.find(x => x.id === id);
+          throw new Error(`Sorry, "${p?.name || "an item"}" is no longer available in the quantity requested.`);
+        }
+      }
+
+      // 2. Create order record
       const { data: order, error: orderErr } = await supabase
         .from("orders")
         .insert({
@@ -734,7 +766,7 @@ function KioskPayment({ cart, products, onPaid, verificationId, kioskId, venueId
       setPhase("done");
       setTimeout(() => onPaid(oid), 1500);
     } catch (e) {
-      setError("Payment failed. Please try again.");
+      setError(e.message?.includes("no longer available") ? e.message : "Payment failed. Please try again.");
       setPhase("waiting");
     }
   };
@@ -1386,10 +1418,16 @@ function ManagerView({ user }) {
     setStaffList(data || []);
   };
 
-  const filteredProducts = products.filter(p =>
-    p.name.toLowerCase().includes(searchQ.toLowerCase()) ||
-    (p.brand || "").toLowerCase().includes(searchQ.toLowerCase())
-  );
+  const filteredProducts = products
+    .filter(p =>
+      p.name.toLowerCase().includes(searchQ.toLowerCase()) ||
+      (p.brand || "").toLowerCase().includes(searchQ.toLowerCase())
+    )
+    .sort((a, b) => {
+      if (a.stock === 0 && b.stock > 0) return 1;
+      if (a.stock > 0 && b.stock === 0) return -1;
+      return 0;
+    });
 
   const maxWeeklySale = Math.max(...weeklySales.map(d => d.sales), 1);
 
