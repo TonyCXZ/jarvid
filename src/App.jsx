@@ -692,6 +692,15 @@ function KioskPayment({ cart, products, onPaid, verificationId, kioskId, venueId
       const { error: itemsErr } = await supabase.from("order_items").insert(items);
       if (itemsErr) throw itemsErr;
 
+      // 3. Decrement inventory for each item
+      for (const item of items) {
+        await supabase.rpc("decrement_inventory", {
+          p_product_id: item.product_id,
+          p_venue_id: venueId || null,
+          p_quantity: item.quantity,
+        });
+      }
+
       return order.id;
     } catch (e) {
       console.error("Order creation failed:", e);
@@ -895,6 +904,38 @@ function StaffView({ user }) {
   const [filter, setFilter] = useState("all");
   const [error, setError] = useState(null);
   const [venueName, setVenueName] = useState("");
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const knownOrderIds = useRef(new Set());
+  const isFirstLoad = useRef(true);
+  const soundEnabled_ref = useRef(true);
+
+  useEffect(() => { soundEnabled_ref.current = soundEnabled; }, [soundEnabled]);
+
+  const playAlertSound = () => {
+    if (!soundEnabled_ref.current) return;
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const playTone = (freq, startTime, duration, gain = 0.3) => {
+        const osc = ctx.createOscillator();
+        const gainNode = ctx.createGain();
+        osc.connect(gainNode);
+        gainNode.connect(ctx.destination);
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(freq, startTime);
+        gainNode.gain.setValueAtTime(0, startTime);
+        gainNode.gain.linearRampToValueAtTime(gain, startTime + 0.02);
+        gainNode.gain.linearRampToValueAtTime(0, startTime + duration);
+        osc.start(startTime);
+        osc.stop(startTime + duration + 0.05);
+      };
+      const t = ctx.currentTime;
+      playTone(880, t, 0.12);
+      playTone(1100, t + 0.15, 0.12);
+      playTone(1320, t + 0.30, 0.18);
+    } catch (e) {
+      console.warn("Audio not available:", e);
+    }
+  };
 
   useEffect(() => {
     if (user?.venue_id) {
@@ -919,12 +960,23 @@ function StaffView({ user }) {
         .order("created_at", { ascending: false })
         .limit(50);
 
-      // Filter by venue for staff and managers
       if (user?.venue_id) query = query.eq("venue_id", user.venue_id);
 
       const { data, error: err } = await query;
       if (err) throw err;
-      setOrders(data || []);
+      const incoming = data || [];
+
+      // Detect genuinely new pending orders after first load
+      if (!isFirstLoad.current) {
+        const newPending = incoming.filter(o => o.status === "pending" && !knownOrderIds.current.has(o.id));
+        if (newPending.length > 0) playAlertSound();
+      }
+
+      // Update known IDs
+      incoming.forEach(o => knownOrderIds.current.add(o.id));
+      isFirstLoad.current = false;
+
+      setOrders(incoming);
     } catch (e) {
       console.error("Error loading orders:", e);
       setError("Failed to load orders.");
