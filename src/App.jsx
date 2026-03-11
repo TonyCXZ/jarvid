@@ -2309,12 +2309,15 @@ function LoginScreen({ onLogin }) {
 }
 
 export default function App() {
+  const urlParams = new URLSearchParams(window.location.search);
+  const isStaffMode = urlParams.get("mode") === "staff";
+
   const [activeTab, setActiveTab] = useState("kiosk");
   const [pendingCount, setPendingCount] = useState(0);
   const [user, setUser] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const [showLogin, setShowLogin] = useState(false);
-  const [kioskLocked, setKioskLocked] = useState(true);
+  const [showLogin, setShowLogin] = useState(isStaffMode);
+  const [kioskLocked, setKioskLocked] = useState(!isStaffMode);
   const [showPinOverlay, setShowPinOverlay] = useState(false);
   const [pinEntry, setPinEntry] = useState("");
   const [pinError, setPinError] = useState("");
@@ -2394,7 +2397,7 @@ export default function App() {
   }, [user?.venue_id]);
 
   const handleLogoTap = () => {
-    if (!kioskLocked) return;
+    if (!kioskLocked || isStaffMode) return;
     const newCount = logoTapCount + 1;
     setLogoTapCount(newCount);
     clearTimeout(logoTapTimer.current);
@@ -2447,8 +2450,16 @@ export default function App() {
     setShowStaffTimeout(false);
     await supabase.auth.signOut();
     setUser(null);
-    setActiveTab("kiosk");
-    setKioskLocked(true);
+    if (isStaffMode) {
+      // Staff tablet — return to login, never show kiosk
+      setActiveTab("kiosk");
+      setKioskLocked(false);
+      setShowLogin(true);
+    } else {
+      // Kiosk tablet — lock back to kiosk mode
+      setActiveTab("kiosk");
+      setKioskLocked(true);
+    }
   };
 
   const resetStaffTimer = useCallback(() => {
