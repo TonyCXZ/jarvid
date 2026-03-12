@@ -1343,6 +1343,87 @@ function KioskView({ venueId: propVenueId }) {
 }
 
 // ============================================================
+// ============================================================
+// KIOSK OFFLINE — shared hook + banner
+// ============================================================
+function useOfflineKiosks(venueId) {
+  const [offlineKiosks, setOfflineKiosks] = useState([]);
+  const STALE_MS = 2 * 60 * 1000; // 2 minutes
+
+  const check = useCallback(async () => {
+    if (!venueId) return;
+    const { data } = await supabase
+      .from("kiosks")
+      .select("id, name, device_id, last_heartbeat")
+      .eq("venue_id", venueId);
+    if (!data) return;
+    const now = Date.now();
+    setOfflineKiosks(
+      data.filter(k => !k.last_heartbeat || (now - new Date(k.last_heartbeat).getTime()) > STALE_MS)
+    );
+  }, [venueId]);
+
+  useEffect(() => {
+    check();
+    const t = setInterval(check, 30000);
+    return () => clearInterval(t);
+  }, [check]);
+
+  return offlineKiosks;
+}
+
+function KioskOfflineBanner({ venueId, onAlert }) {
+  const offlineKiosks = useOfflineKiosks(venueId);
+  const prevCount = useRef(0);
+  const alertedIds = useRef(new Set());
+
+  useEffect(() => {
+    // Fire audible alert for any newly-offline kiosk
+    offlineKiosks.forEach(k => {
+      if (!alertedIds.current.has(k.id)) {
+        alertedIds.current.add(k.id);
+        if (onAlert) onAlert();
+      }
+    });
+    // Clear alert tracking when kiosk comes back online
+    if (offlineKiosks.length < prevCount.current) {
+      // Remove kiosks that are no longer offline from alertedIds
+      const offlineIds = new Set(offlineKiosks.map(k => k.id));
+      for (const id of alertedIds.current) {
+        if (!offlineIds.has(id)) alertedIds.current.delete(id);
+      }
+    }
+    prevCount.current = offlineKiosks.length;
+  }, [offlineKiosks, onAlert]);
+
+  if (offlineKiosks.length === 0) return null;
+
+  return (
+    <div style={{
+      background: "rgba(192,57,43,0.12)",
+      border: "1px solid rgba(192,57,43,0.4)",
+      borderRadius: 10,
+      padding: "10px 16px",
+      display: "flex",
+      alignItems: "center",
+      gap: 10,
+      marginBottom: 12,
+      animation: "pulseRed 2.5s ease-in-out infinite",
+    }}>
+      <span style={{ fontSize: 18 }}>📵</span>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: DS.colors.danger }}>
+          {offlineKiosks.length === 1 ? "Kiosk offline" : `${offlineKiosks.length} kiosks offline`}
+        </div>
+        <div style={{ fontSize: 11, color: DS.colors.textMuted, marginTop: 2 }}>
+          {offlineKiosks.map(k => k.name || k.device_id?.slice(0, 12) || "Unknown").join(", ")} · No heartbeat in 2+ minutes
+        </div>
+      </div>
+      <span style={{ fontSize: 11, color: DS.colors.danger, fontFamily: "monospace", fontWeight: 700 }}>OFFLINE</span>
+    </div>
+  );
+}
+
 // STAFF VIEW — live orders from Supabase with realtime
 // ============================================================
 function LowStockBanner({ venueId }) {
@@ -1568,6 +1649,33 @@ function StaffView({ user, kioskoidMode, venueIdOverride, kioskPin: kioskPinProp
     }
   };
 
+  // Descending 3-tone alert — distinct from new order chime
+  const playOfflineAlert = useCallback(() => {
+    if (!soundEnabled_ref.current) return;
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const playTone = (freq, startTime, duration, gain = 0.35) => {
+        const osc = ctx.createOscillator();
+        const gainNode = ctx.createGain();
+        osc.connect(gainNode);
+        gainNode.connect(ctx.destination);
+        osc.type = "triangle";
+        osc.frequency.setValueAtTime(freq, startTime);
+        gainNode.gain.setValueAtTime(0, startTime);
+        gainNode.gain.linearRampToValueAtTime(gain, startTime + 0.03);
+        gainNode.gain.linearRampToValueAtTime(0, startTime + duration);
+        osc.start(startTime);
+        osc.stop(startTime + duration + 0.05);
+      };
+      const t = ctx.currentTime;
+      playTone(440, t, 0.2);
+      playTone(330, t + 0.25, 0.2);
+      playTone(220, t + 0.50, 0.3);
+    } catch (e) {
+      console.warn("Audio not available:", e);
+    }
+  }, []);
+
   useEffect(() => {
     const vid = venueIdOverride || user?.venue_id;
     if (vid) {
@@ -1690,6 +1798,9 @@ function StaffView({ user, kioskoidMode, venueIdOverride, kioskPin: kioskPinProp
 
       {/* Low stock / out of stock alert banner */}
       <LowStockBanner venueId={venueIdOverride || user?.venue_id} />
+
+      {/* Kiosk offline alert banner */}
+      <KioskOfflineBanner venueId={venueIdOverride || user?.venue_id} onAlert={playOfflineAlert} />
 
       <div className="orders-grid">
         {loading && (
@@ -2410,6 +2521,7 @@ function ManagerView({ user }) {
       <div className="manager-content">
         {activeSection === "overview" && (
           <>
+            <KioskOfflineBanner venueId={VENUE_ID} />
             <div>
               <div className="section-title">TODAY'S OVERVIEW</div>
               <div className="section-sub">{new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</div>
