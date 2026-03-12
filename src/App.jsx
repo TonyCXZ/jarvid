@@ -1446,11 +1446,9 @@ function ManagerView({ user }) {
     const todayStart = new Date(); todayStart.setHours(0,0,0,0);
     const yesterdayStart = new Date(todayStart); yesterdayStart.setDate(yesterdayStart.getDate() - 1);
 
-    const [todayOrdersRes, yesterdayOrdersRes, todayItemsRes, yesterdayItemsRes, verifyRes, venueRes] = await Promise.all([
+    const [todayOrdersRes, yesterdayOrdersRes, verifyRes, venueRes] = await Promise.all([
       supabase.from("orders").select("id, total_pence, status").eq("venue_id", VENUE_ID).gte("created_at", todayStart.toISOString()).eq("status", "completed"),
       supabase.from("orders").select("id, total_pence, status").eq("venue_id", VENUE_ID).gte("created_at", yesterdayStart.toISOString()).lt("created_at", todayStart.toISOString()).eq("status", "completed"),
-      supabase.from("order_items").select("quantity, unit_price_pence, products(supply_price_pence), orders!inner(venue_id, created_at, status)").eq("orders.venue_id", VENUE_ID).eq("orders.status", "completed").gte("orders.created_at", todayStart.toISOString()),
-      supabase.from("order_items").select("quantity, unit_price_pence, products(supply_price_pence), orders!inner(venue_id, created_at, status)").eq("orders.venue_id", VENUE_ID).eq("orders.status", "completed").gte("orders.created_at", yesterdayStart.toISOString()).lt("orders.created_at", todayStart.toISOString()),
       supabase.from("age_verifications").select("result").gte("verified_at", todayStart.toISOString()),
       supabase.from("venues").select("jarvid_profit_share_pct").eq("id", VENUE_ID).single(),
     ]);
@@ -1460,6 +1458,30 @@ function ManagerView({ user }) {
     const verifications = verifyRes.data || [];
     const pct = venueRes.data?.jarvid_profit_share_pct || 20;
     setJarvidPct(pct);
+
+    // Helper: fetch items + supply prices for a set of order IDs using chunked queries
+    const fetchItemsForOrders = async (orders) => {
+      const ids = orders.map(o => o.id);
+      if (ids.length === 0) return [];
+      const CHUNK = 100;
+      const chunks = [];
+      for (let i = 0; i < ids.length; i += CHUNK) chunks.push(ids.slice(i, i + CHUNK));
+      const chunkResults = await Promise.all(chunks.map(chunk =>
+        supabase.from("order_items").select("order_id, quantity, unit_price_pence, product_id").in("order_id", chunk)
+      ));
+      const allItems = chunkResults.flatMap(r => r.data || []);
+      if (allItems.length === 0) return [];
+      const productIds = [...new Set(allItems.map(i => i.product_id))];
+      const { data: productsData } = await supabase.from("products").select("id, supply_price_pence").in("id", productIds);
+      const supplyMap = {};
+      (productsData || []).forEach(p => { supplyMap[p.id] = p.supply_price_pence || 0; });
+      return allItems.map(item => ({ ...item, products: { supply_price_pence: supplyMap[item.product_id] || 0 } }));
+    };
+
+    const [todayItems, yesterdayItems] = await Promise.all([
+      fetchItemsForOrders(todayOrders),
+      fetchItemsForOrders(yesterdayOrders),
+    ]);
 
     const todayRevenue = todayOrders.reduce((s, o) => s + (o.total_pence || 0), 0);
     const yesterdayRevenue = yesterdayOrders.reduce((s, o) => s + (o.total_pence || 0), 0);
@@ -1471,8 +1493,8 @@ function ManagerView({ user }) {
     const passRate = verifications.length > 0 ? Math.round((passCount / verifications.length) * 100) : 100;
     const revDelta = yesterdayRevenue > 0 ? Math.round(((todayRevenue - yesterdayRevenue) / yesterdayRevenue) * 100) : 0;
 
-    const todayProfit = calcProfit(todayItemsRes.data || [], pct);
-    const yesterdayProfit = calcProfit(yesterdayItemsRes.data || [], pct);
+    const todayProfit = calcProfit(todayItems, pct);
+    const yesterdayProfit = calcProfit(yesterdayItems, pct);
     const profitDelta = yesterdayProfit.venueShare > 0 ? Math.round(((todayProfit.venueShare - yesterdayProfit.venueShare) / yesterdayProfit.venueShare) * 100) : 0;
 
     setOverview({ todayRevenue, todayCount, avgOrder, prevAvg, verifications: verifications.length, passRate, revDelta, countDelta: todayCount - yesterdayCount, todayProfit, profitDelta });
