@@ -1289,6 +1289,7 @@ function StaffView({ user, kioskoidMode, venueIdOverride, kioskPin: kioskPinProp
   const loadOrders = useCallback(async () => {
     const vid = venueIdOverride || user?.venue_id;
     try {
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       let query = supabase
         .from("orders")
         .select(`
@@ -1300,8 +1301,8 @@ function StaffView({ user, kioskoidMode, venueIdOverride, kioskPin: kioskPinProp
           ),
           age_verifications ( method )
         `)
-        .order("created_at", { ascending: false })
-        .limit(50);
+        .gte("created_at", since)
+        .order("created_at", { ascending: false });
 
       if (vid) query = query.eq("venue_id", vid);
 
