@@ -415,11 +415,22 @@ function KioskWelcome({ onStart }) {
         <div className="welcome-sub">Compliance & Ordering Platform for Age-Restricted Retail</div>
       </div>
       <div className="welcome-age-notice">
-        ⚠️ You must be 18 or over to purchase these products.
-        Age verification is required before your order can be completed.
+        ⚠️ This kiosk sells age-restricted products. You must be 18 or over to proceed.
+        Age verification will be required before your order can be completed.
         Please have a valid form of ID ready — driving licence, passport, or Yoti digital ID.
       </div>
-      <button className="btn-primary" onClick={onStart}>TAP TO START</button>
+      <div style={{ maxWidth: 520, width: "100%" }}>
+        <div style={{
+          fontSize: 14, color: DS.colors.textSub, textAlign: "center",
+          marginBottom: 16, lineHeight: 1.6,
+        }}>
+          By tapping below you confirm that you are <strong style={{ color: DS.colors.white }}>18 years of age or older</strong> and agree to our terms of sale.
+          Providing false information to obtain age-restricted products is a criminal offence.
+        </div>
+        <button className="btn-primary" onClick={onStart} style={{ width: "100%", fontSize: 18, padding: "20px 0" }}>
+          ✓ &nbsp;I AM 18 OR OVER — TAP TO START
+        </button>
+      </div>
       <div style={{ fontSize: 13, color: DS.colors.textMuted }}>Staff Fulfilled · Age Verified · Fully Compliant</div>
       <div style={{ fontSize: 12, color: DS.colors.textMuted, border: `1px solid ${DS.colors.border}`, borderRadius: 6, padding: "6px 14px", letterSpacing: "0.04em" }}>
         ℹ️ This is not a vending machine. All orders are fulfilled by a member of staff.
