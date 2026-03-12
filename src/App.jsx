@@ -385,26 +385,105 @@ const calcProfit = (items, jarvidPct = 20) => {
 const GBPtoPence = (p) => Math.round(p * 100);
 
 // ============================================================
-// PRODUCT IMAGE
+// PRODUCT IMAGE — with per-category SVG fallbacks
 // ============================================================
-function ProductImage({ imageUrl, name, size = "card" }) {
+function CategoryFallbackSVG({ category, size = 80 }) {
+  const accent = "#39d353";
+  const dim = "#2a3a2a";
+  const mid = "#1e2e1e";
+
+  const icons = {
+    eliquid: (
+      // Bottle with liquid
+      <svg width={size} height={size} viewBox="0 0 80 80" fill="none">
+        <rect x="30" y="8" width="20" height="8" rx="3" fill={dim} />
+        <rect x="27" y="14" width="26" height="5" rx="2" fill={dim} />
+        <path d="M24 19 Q20 28 20 42 Q20 62 40 64 Q60 62 60 42 Q60 28 56 19 Z" fill={mid} stroke={dim} strokeWidth="1.5"/>
+        <path d="M24 44 Q24 62 40 64 Q56 62 56 44 Z" fill={accent} opacity="0.18"/>
+        <ellipse cx="40" cy="44" rx="16" ry="3" fill={accent} opacity="0.12"/>
+        <path d="M33 36 Q36 32 40 35 Q44 38 47 34" stroke={accent} strokeWidth="1.5" strokeLinecap="round" opacity="0.4"/>
+      </svg>
+    ),
+    prefilled_pod: (
+      // Pod device
+      <svg width={size} height={size} viewBox="0 0 80 80" fill="none">
+        <rect x="28" y="10" width="24" height="60" rx="8" fill={mid} stroke={dim} strokeWidth="1.5"/>
+        <rect x="32" y="14" width="16" height="28" rx="4" fill={dim}/>
+        <rect x="32" y="14" width="16" height="12" rx="4" fill={accent} opacity="0.15"/>
+        <circle cx="40" cy="62" r="4" fill={dim} stroke={accent} strokeWidth="1" opacity="0.6"/>
+        <rect x="35" y="44" width="10" height="3" rx="1.5" fill={accent} opacity="0.3"/>
+      </svg>
+    ),
+    refillable_kit: (
+      // Mod/box device
+      <svg width={size} height={size} viewBox="0 0 80 80" fill="none">
+        <rect x="18" y="18" width="44" height="52" rx="6" fill={mid} stroke={dim} strokeWidth="1.5"/>
+        <rect x="34" y="8" width="12" height="12" rx="3" fill={dim} stroke={dim} strokeWidth="1"/>
+        <rect x="37" y="4" width="6" height="6" rx="2" fill={dim}/>
+        <rect x="22" y="24" width="36" height="20" rx="3" fill={dim}/>
+        <rect x="22" y="24" width="36" height="8" rx="3" fill={accent} opacity="0.12"/>
+        <circle cx="30" cy="56" r="5" fill={dim} stroke={accent} strokeWidth="1.2" opacity="0.7"/>
+        <rect x="38" y="52" width="16" height="3" rx="1.5" fill={dim}/>
+        <rect x="38" y="57" width="10" height="3" rx="1.5" fill={dim} opacity="0.5"/>
+      </svg>
+    ),
+    refillable_pods: (
+      // Pod pack
+      <svg width={size} height={size} viewBox="0 0 80 80" fill="none">
+        <rect x="20" y="16" width="18" height="50" rx="6" fill={mid} stroke={dim} strokeWidth="1.5"/>
+        <rect x="24" y="20" width="10" height="22" rx="3" fill={dim}/>
+        <rect x="24" y="20" width="10" height="9" rx="3" fill={accent} opacity="0.15"/>
+        <rect x="42" y="20" width="18" height="50" rx="6" fill={mid} stroke={dim} strokeWidth="1.5"/>
+        <rect x="46" y="24" width="10" height="22" rx="3" fill={dim}/>
+        <rect x="46" y="24" width="10" height="9" rx="3" fill={accent} opacity="0.12"/>
+        <circle cx="29" cy="56" r="3.5" fill={dim} stroke={accent} strokeWidth="1" opacity="0.6"/>
+        <circle cx="51" cy="60" r="3.5" fill={dim} stroke={accent} strokeWidth="1" opacity="0.6"/>
+      </svg>
+    ),
+    nicotine_pouch: (
+      // Round tin/can
+      <svg width={size} height={size} viewBox="0 0 80 80" fill="none">
+        <ellipse cx="40" cy="26" rx="26" ry="10" fill={dim} stroke={dim} strokeWidth="1.5"/>
+        <rect x="14" y="26" width="52" height="28" fill={mid} stroke={dim} strokeWidth="1.5"/>
+        <ellipse cx="40" cy="54" rx="26" ry="10" fill={mid} stroke={dim} strokeWidth="1.5"/>
+        <ellipse cx="40" cy="26" rx="26" ry="10" fill={dim}/>
+        <ellipse cx="40" cy="26" rx="18" ry="6" fill={accent} opacity="0.1"/>
+        <ellipse cx="40" cy="26" rx="10" ry="3" fill={accent} opacity="0.15"/>
+        <rect x="14" y="34" width="52" height="4" fill={accent} opacity="0.08"/>
+      </svg>
+    ),
+    default: (
+      // Generic vape outline
+      <svg width={size} height={size} viewBox="0 0 80 80" fill="none">
+        <rect x="30" y="10" width="20" height="60" rx="7" fill={mid} stroke={dim} strokeWidth="1.5"/>
+        <rect x="33" y="14" width="14" height="20" rx="3" fill={dim}/>
+        <rect x="33" y="14" width="14" height="8" rx="3" fill={accent} opacity="0.12"/>
+        <circle cx="40" cy="62" r="4" fill={dim} stroke={accent} strokeWidth="1" opacity="0.5"/>
+      </svg>
+    ),
+  };
+
+  return icons[category] || icons.default;
+}
+
+function ProductImage({ imageUrl, name, size = "card", category }) {
   const [errored, setErrored] = useState(false);
-  const FALLBACK = { "ELUX": "💧", "HAYATI": "🫧", "VAPORESSO": "⚡", "OXVA": "🔋" };
-  const brand = name?.split(" ")[0]?.toUpperCase();
-  const fallback = FALLBACK[brand] || "🛒";
+  const showFallback = !imageUrl || errored;
 
   if (size === "card") {
     return (
-      <div className="product-image-wrap">
-        {!errored
+      <div className="product-image-wrap" style={showFallback ? { background: "rgba(57,211,83,0.04)", border: "1px solid rgba(57,211,83,0.08)" } : {}}>
+        {!showFallback
           ? <img src={imageUrl} alt={name} className="product-image" onError={() => setErrored(true)} crossOrigin="anonymous" />
-          : <span style={{ fontSize: 48 }}>{fallback}</span>}
+          : <CategoryFallbackSVG category={category} size={72} />}
       </div>
     );
   }
   const s = size === "thumb" ? 48 : 32;
-  return errored
-    ? <span style={{ fontSize: s * 0.7, width: s, height: s, display: "flex", alignItems: "center", justifyContent: "center" }}>{fallback}</span>
+  return showFallback
+    ? <div style={{ width: s, height: s, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 6, background: "rgba(57,211,83,0.04)", border: "1px solid rgba(57,211,83,0.08)", flexShrink: 0 }}>
+        <CategoryFallbackSVG category={category} size={s * 0.8} />
+      </div>
     : <img src={imageUrl} alt={name} crossOrigin="anonymous" onError={() => setErrored(true)}
         style={{ width: s, height: s, objectFit: "contain", borderRadius: 6, background: "rgba(255,255,255,0.03)", flexShrink: 0 }} />;
 }
@@ -558,7 +637,7 @@ function KioskBrowse({ cart, onAddToCart, onRemoveFromCart, onCheckout, venueId,
                     ? <div className="out-of-stock-badge">Out of Stock</div>
                     : p.popular && <div className="popular-badge">HOT</div>
                   }
-                  <ProductImage imageUrl={p.image_url} name={p.name} size="card" />
+                  <ProductImage imageUrl={p.image_url} name={p.name} size="card" category={p.category} />
                   <div className="product-brand">{p.brand}</div>
                   <div className="product-name">{p.name}</div>
                   {p.flavour && <div className="product-flavour">{p.flavour}</div>}
@@ -601,7 +680,7 @@ function KioskBrowse({ cart, onAddToCart, onRemoveFromCart, onCheckout, venueId,
                 if (!p) return null;
                 return (
                   <div key={id} className="cart-item">
-                    <ProductImage imageUrl={p.image_url} name={p.name} size="thumb" />
+                    <ProductImage imageUrl={p.image_url} name={p.name} size="thumb" category={p.category} />
                     <div className="cart-item-info">
                       <div className="cart-item-name">{p.name}</div>
                       <div className="cart-item-price">{fmt(p.price)} each</div>
@@ -2375,7 +2454,7 @@ function ManagerView({ user }) {
                           <div style={{ color: DS.colors.textMuted, fontSize: 13 }}>No sales data</div>
                         ) : dayDetail.topProducts.map(p => (
                           <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: `1px solid ${DS.colors.border}` }}>
-                            <ProductImage imageUrl={p.image_url} name={p.name} size="thumb" />
+                            <ProductImage imageUrl={p.image_url} name={p.name} size="thumb" category={p.category} />
                             <div style={{ flex: 1 }}>
                               <div style={{ fontSize: 12, fontWeight: 600 }}>{p.name}</div>
                               <div style={{ fontSize: 11, color: DS.colors.textMuted }}>{p.brand}</div>
@@ -2428,7 +2507,7 @@ function ManagerView({ user }) {
                   {topProducts.map(p => (
                     <tr key={p.id}>
                       <td style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                        <ProductImage imageUrl={p.image_url} name={p.name} size="row" />
+                        <ProductImage imageUrl={p.image_url} name={p.name} size="row" category={p.category} />
                         <span>{p.name}<br /><span style={{ fontSize: 11, color: DS.colors.textMuted }}>{p.brand}</span></span>
                       </td>
                       <td style={{ color: DS.colors.white, fontWeight: 600 }}>{p.units}</td>
@@ -2639,7 +2718,7 @@ function ManagerView({ user }) {
                       {filteredProducts.map(p => (
                         <tr key={p.id}>
                           <td style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                            <ProductImage imageUrl={p.image_url} name={p.name} size="row" />
+                            <ProductImage imageUrl={p.image_url} name={p.name} size="row" category={p.category} />
                             <span>{p.name}<br /><span style={{ fontSize: 11, color: DS.colors.textMuted }}>{p.brand}</span></span>
                           </td>
                           <td><span className="tag-pill" style={{ background: "rgba(124,92,191,0.15)", color: DS.colors.purple }}>{(p.category || "").replace("_", " ")}</span></td>
@@ -2704,7 +2783,7 @@ function ManagerView({ user }) {
                           const out = isOutOfStock(p);
                           return (
                             <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 16, padding: "12px 0", borderBottom: `1px solid ${DS.colors.border}` }}>
-                              <ProductImage imageUrl={p.image_url} name={p.name} size="thumb" />
+                              <ProductImage imageUrl={p.image_url} name={p.name} size="thumb" category={p.category} />
                               <div style={{ flex: 1 }}>
                                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                                   <span style={{ fontWeight: 600 }}>{p.name}</span>
