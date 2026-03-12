@@ -412,7 +412,6 @@ function KioskWelcome({ onStart }) {
     <div className="welcome-screen">
       <div>
         <div className="welcome-logo">J<span className="glow">arv</span>ID</div>
-        <div className="welcome-sub">Compliance & Ordering Platform for Age-Restricted Retail</div>
       </div>
       <div className="welcome-age-notice">
         ⚠️ This kiosk sells age-restricted products. You must be 18 or over to proceed.
