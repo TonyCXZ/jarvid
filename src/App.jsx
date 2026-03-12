@@ -1672,27 +1672,27 @@ function ManagerView({ user }) {
     const allOrderIds = allOrders.map(o => o.id);
     console.log("[JarvID] allOrders count:", allOrders.length, "VENUE_ID:", VENUE_ID);
 
-    // Fetch items via two separate queries to avoid PostgREST join issues
+    // Fetch items in chunks of 100 to avoid PostgREST URL length limits
     let itemsByOrder = {};
     if (allOrderIds.length > 0) {
-      const { data: itemsData, error: itemsError } = await supabase
-        .from("order_items")
-        .select("order_id, quantity, unit_price_pence, product_id")
-        .in("order_id", allOrderIds);
-      console.log("[JarvID] itemsData count:", (itemsData || []).length, "error:", itemsError?.message);
+      const CHUNK = 100;
+      const chunks = [];
+      for (let i = 0; i < allOrderIds.length; i += CHUNK) chunks.push(allOrderIds.slice(i, i + CHUNK));
+      const chunkResults = await Promise.all(chunks.map(chunk =>
+        supabase.from("order_items").select("order_id, quantity, unit_price_pence, product_id").in("order_id", chunk)
+      ));
+      const allItems = chunkResults.flatMap(r => r.data || []);
 
-      if (itemsData && itemsData.length > 0) {
-        const productIds = [...new Set(itemsData.map(i => i.product_id))];
-        const { data: productsData, error: prodError } = await supabase
+      if (allItems.length > 0) {
+        const productIds = [...new Set(allItems.map(i => i.product_id))];
+        const { data: productsData } = await supabase
           .from("products")
           .select("id, supply_price_pence")
           .in("id", productIds);
-        console.log("[JarvID] productsData:", JSON.stringify((productsData || []).slice(0, 3)), "error:", prodError?.message);
-
         const supplyMap = {};
         (productsData || []).forEach(p => { supplyMap[p.id] = p.supply_price_pence || 0; });
 
-        itemsData.forEach(item => {
+        allItems.forEach(item => {
           const oid = item.order_id;
           if (!itemsByOrder[oid]) itemsByOrder[oid] = [];
           itemsByOrder[oid].push({
