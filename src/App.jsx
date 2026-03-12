@@ -44,6 +44,24 @@ const CATEGORIES = [
 ];
 
 // ============================================================
+// LOW STOCK THRESHOLDS — per category
+// ============================================================
+const LOW_STOCK_THRESHOLDS = {
+  eliquid:         5,
+  prefilled_pod:   3,
+  refillable_kit:  2,
+  refillable_pods: 4,
+  default:         5,
+};
+
+const getLowStockThreshold = (product) => {
+  if (product?.low_stock_threshold != null) return product.low_stock_threshold;
+  return LOW_STOCK_THRESHOLDS[product?.category] || LOW_STOCK_THRESHOLDS.default;
+};
+const isLowStock = (product) => product.stock > 0 && product.stock <= getLowStockThreshold(product);
+const isOutOfStock = (product) => product.stock === 0;
+
+// ============================================================
 // MOCK VENUES (until auth is wired)
 // ============================================================
 const MOCK_VENUES = [
@@ -1141,6 +1159,73 @@ function KioskView({ venueId: propVenueId }) {
 // ============================================================
 // STAFF VIEW — live orders from Supabase with realtime
 // ============================================================
+function LowStockBanner({ venueId }) {
+  const [alerts, setAlerts] = useState([]);
+
+  useEffect(() => {
+    if (!venueId) return;
+    const load = async () => {
+      const { data } = await supabase
+        .from("products")
+        .select("id, name, category, low_stock_threshold, inventory(quantity)")
+        .eq("venue_id", venueId)
+        .eq("is_active", true);
+      if (!data) return;
+      const flagged = data
+        .map(p => ({ ...p, stock: p.inventory?.[0]?.quantity ?? 0 }))
+        .filter(p => {
+          const threshold = getLowStockThreshold(p.category);
+          return p.stock <= threshold;
+        })
+        .sort((a, b) => a.stock - b.stock);
+      setAlerts(flagged);
+    };
+    load();
+    const interval = setInterval(load, 60000); // refresh every minute
+    return () => clearInterval(interval);
+  }, [venueId]);
+
+  if (alerts.length === 0) return null;
+
+  const outOfStock = alerts.filter(p => p.stock === 0);
+  const lowStock = alerts.filter(p => p.stock > 0);
+
+  return (
+    <div style={{ margin: "0 20px 12px", display: "flex", flexDirection: "column", gap: 6 }}>
+      {outOfStock.length > 0 && (
+        <div style={{
+          background: DS.colors.dangerGlow, border: `1px solid ${DS.colors.danger}`,
+          borderRadius: 8, padding: "10px 16px", display: "flex", alignItems: "center", gap: 10,
+        }}>
+          <span style={{ fontSize: 16 }}>🚨</span>
+          <div style={{ flex: 1 }}>
+            <span style={{ fontWeight: 700, color: DS.colors.danger, fontSize: 13 }}>OUT OF STOCK: </span>
+            <span style={{ fontSize: 13, color: DS.colors.text }}>
+              {outOfStock.map(p => p.name).join(", ")}
+            </span>
+          </div>
+          <span style={{ fontSize: 11, color: DS.colors.danger, whiteSpace: "nowrap" }}>Notify manager</span>
+        </div>
+      )}
+      {lowStock.length > 0 && (
+        <div style={{
+          background: DS.colors.warnGlow, border: `1px solid ${DS.colors.warn}`,
+          borderRadius: 8, padding: "10px 16px", display: "flex", alignItems: "center", gap: 10,
+        }}>
+          <span style={{ fontSize: 16 }}>⚠️</span>
+          <div style={{ flex: 1 }}>
+            <span style={{ fontWeight: 700, color: DS.colors.warn, fontSize: 13 }}>LOW STOCK: </span>
+            <span style={{ fontSize: 13, color: DS.colors.text }}>
+              {lowStock.map(p => `${p.name} (${p.stock} left)`).join(", ")}
+            </span>
+          </div>
+          <span style={{ fontSize: 11, color: DS.colors.warn, whiteSpace: "nowrap" }}>Notify manager</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StaffView({ user, kioskoidMode, venueIdOverride, kioskPin: kioskPinProp, onUnlock }) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1408,6 +1493,9 @@ function StaffView({ user, kioskoidMode, venueIdOverride, kioskPin: kioskPinProp
 
       {error && <div className="error-banner" style={{ margin: "0 20px" }}>{error}</div>}
 
+      {/* Low stock / out of stock alert banner */}
+      <LowStockBanner venueId={venueIdOverride || user?.venue_id} />
+
       <div className="orders-grid">
         {loading && (
           <div style={{ gridColumn: "1/-1", display: "flex", justifyContent: "center", padding: 60 }}>
@@ -1624,6 +1712,8 @@ function ManagerView({ user }) {
   const [loadingAnalytics, setLoadingAnalytics] = useState(false);
   const [analyticsSelected, setAnalyticsSelected] = useState(null);
   const [exportLoading, setExportLoading] = useState(null);
+  const [editingProduct, setEditingProduct] = useState(null);
+  const [savingProduct, setSavingProduct] = useState(false);
   const [exportRange, setExportRange] = useState(() => {
     const end = new Date();
     const start = new Date(); start.setDate(start.getDate() - 30);
@@ -2036,7 +2126,7 @@ function ManagerView({ user }) {
 
   const loadProducts = async () => {
     setLoadingProducts(true);
-    const { data } = await supabase.from("products").select("*, inventory(quantity)").eq("venue_id", VENUE_ID).order("brand");
+    const { data } = await supabase.from("products").select("*, low_stock_threshold, inventory(quantity)").eq("venue_id", VENUE_ID).order("brand");
     if (data) setProducts(data.map(p => ({ ...p, stock: p.inventory?.[0]?.quantity ?? 0, price: penceToGBP(p.price_pence) })));
     setLoadingProducts(false);
   };
@@ -2442,7 +2532,7 @@ function ManagerView({ user }) {
                 <div className="chart-card" style={{ padding: 0, overflow: "hidden" }}>
                   <table className="data-table">
                     <thead>
-                      <tr><th>Product</th><th>Category</th><th>Price</th><th>Stock</th><th>Status</th><th>Actions</th></tr>
+                      <tr><th>Product</th><th>Category</th><th>Price</th><th>Stock</th><th>Alert At</th><th>Status</th><th>Actions</th></tr>
                     </thead>
                     <tbody>
                       {filteredProducts.map(p => (
@@ -2453,14 +2543,15 @@ function ManagerView({ user }) {
                           </td>
                           <td><span className="tag-pill" style={{ background: "rgba(124,92,191,0.15)", color: DS.colors.purple }}>{(p.category || "").replace("_", " ")}</span></td>
                           <td style={{ color: DS.colors.accent, fontFamily: DS.font.display, fontSize: 16 }}>{fmt(p.price)}</td>
-                          <td><span style={{ color: p.stock < 5 ? DS.colors.danger : p.stock < 15 ? DS.colors.warn : DS.colors.accent }}>{p.stock} units</span></td>
+                          <td><span style={{ color: isOutOfStock(p) ? DS.colors.danger : isLowStock(p) ? DS.colors.warn : DS.colors.accent }}>{p.stock} units</span></td>
+                          <td><span style={{ fontSize: 12, color: DS.colors.textMuted }}>≤{getLowStockThreshold(p)}{p.low_stock_threshold != null ? <span style={{ color: DS.colors.accent }}> ✎</span> : ""}</span></td>
                           <td>
                             <span className="tag-pill" style={p.is_active && p.stock > 0 ? { background: DS.colors.accentGlow, color: DS.colors.accent } : { background: DS.colors.dangerGlow, color: DS.colors.danger }}>
                               {p.is_active && p.stock > 0 ? "Active" : "Inactive"}
                             </span>
                           </td>
                           <td>
-                            <button className="btn-sm btn-outline" style={{ marginRight: 6 }}>Edit</button>
+                            <button className="btn-sm btn-outline" style={{ marginRight: 6 }} onClick={() => setEditingProduct({ ...p, thresholdInput: p.low_stock_threshold != null ? String(p.low_stock_threshold) : "" })}>Edit</button>
                             <button className="btn-sm" style={{ background: DS.colors.dangerGlow, color: DS.colors.danger, border: `1px solid ${DS.colors.danger}` }}>Hide</button>
                           </td>
                         </tr>
@@ -2483,32 +2574,67 @@ function ManagerView({ user }) {
               <div style={{ display: "flex", justifyContent: "center", padding: 40 }}><div className="spinner" /></div>
             ) : (
               <>
-                <div className="stats-row">
-                  <div className="stat-card"><div className="stat-label">Total SKUs</div><div className="stat-value">{products.length}</div></div>
-                  <div className="stat-card"><div className="stat-label">Low Stock</div><div className="stat-value" style={{ color: DS.colors.warn }}>{products.filter(p => p.stock < 10).length}</div><div className="stat-delta" style={{ color: DS.colors.warn }}>⚠ Reorder needed</div></div>
-                  <div className="stat-card"><div className="stat-label">Out of Stock</div><div className="stat-value" style={{ color: DS.colors.danger }}>{products.filter(p => p.stock === 0).length}</div></div>
-                </div>
-                <div className="chart-card">
-                  <div className="chart-title">⚠ Low Stock Alerts</div>
-                  {products.filter(p => p.stock < 15).sort((a, b) => a.stock - b.stock).map(p => (
-                    <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 16, padding: "12px 0", borderBottom: `1px solid ${DS.colors.border}` }}>
-                      <ProductImage imageUrl={p.image_url} name={p.name} size="thumb" />
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 600 }}>{p.name}</div>
-                        <div className="stock-bar-wrap" style={{ marginTop: 4 }}>
-                          <div className="stock-bar-bg" style={{ flex: 1 }}>
-                            <div className="stock-bar-fill" style={{ width: `${(p.stock / 40) * 100}%`, background: p.stock < 5 ? DS.colors.danger : DS.colors.warn }} />
-                          </div>
-                          <span style={{ fontSize: 12, color: DS.colors.textSub, width: 60 }}>{p.stock} / 40</span>
+                {(() => {
+                  const lowStockProducts = products.filter(p => isLowStock(p) || isOutOfStock(p)).sort((a, b) => a.stock - b.stock);
+                  const outOfStockCount = products.filter(p => isOutOfStock(p)).length;
+                  const lowStockCount = products.filter(p => isLowStock(p)).length;
+                  return (
+                    <>
+                      <div className="stats-row">
+                        <div className="stat-card"><div className="stat-label">Total SKUs</div><div className="stat-value">{products.length}</div></div>
+                        <div className="stat-card">
+                          <div className="stat-label">Low Stock</div>
+                          <div className="stat-value" style={{ color: DS.colors.warn }}>{lowStockCount}</div>
+                          {lowStockCount > 0 && <div className="stat-delta" style={{ color: DS.colors.warn }}>⚠ Reorder needed</div>}
+                        </div>
+                        <div className="stat-card">
+                          <div className="stat-label">Out of Stock</div>
+                          <div className="stat-value" style={{ color: DS.colors.danger }}>{outOfStockCount}</div>
+                          {outOfStockCount > 0 && <div className="stat-delta" style={{ color: DS.colors.danger }}>🚨 Action required</div>}
                         </div>
                       </div>
-                      <button className="btn-sm btn-accent">Reorder</button>
-                    </div>
-                  ))}
-                  {products.filter(p => p.stock < 15).length === 0 && (
-                    <div style={{ textAlign: "center", padding: 40, color: DS.colors.textMuted }}>✅ All stock levels are healthy</div>
-                  )}
-                </div>
+                      <div className="chart-card">
+                        <div className="chart-title">⚠ Low Stock & Out of Stock Alerts</div>
+                        <div style={{ fontSize: 12, color: DS.colors.textMuted, marginBottom: 12 }}>
+                          Thresholds: E-Liquids ≤5 · Prefilled Pods ≤3 · Refillable Kits ≤2 · Refillable Pods ≤4
+                        </div>
+                        {lowStockProducts.map(p => {
+                          const threshold = getLowStockThreshold(p.category);
+                          const out = isOutOfStock(p);
+                          return (
+                            <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 16, padding: "12px 0", borderBottom: `1px solid ${DS.colors.border}` }}>
+                              <ProductImage imageUrl={p.image_url} name={p.name} size="thumb" />
+                              <div style={{ flex: 1 }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                  <span style={{ fontWeight: 600 }}>{p.name}</span>
+                                  <span style={{
+                                    fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 4,
+                                    background: out ? DS.colors.dangerGlow : DS.colors.warnGlow,
+                                    color: out ? DS.colors.danger : DS.colors.warn,
+                                  }}>{out ? "OUT OF STOCK" : "LOW STOCK"}</span>
+                                </div>
+                                <div style={{ fontSize: 11, color: DS.colors.textMuted, marginTop: 2 }}>
+                                  {p.category?.replace(/_/g, " ")} · threshold: {threshold} units
+                                  {p.low_stock_threshold != null && <span style={{ color: DS.colors.accent, marginLeft: 6 }}>· custom</span>}
+                                </div>
+                                <div className="stock-bar-wrap" style={{ marginTop: 6 }}>
+                                  <div className="stock-bar-bg" style={{ flex: 1 }}>
+                                    <div className="stock-bar-fill" style={{ width: `${Math.min((p.stock / (threshold * 3)) * 100, 100)}%`, background: out ? DS.colors.danger : DS.colors.warn }} />
+                                  </div>
+                                  <span style={{ fontSize: 12, color: DS.colors.textSub, width: 60 }}>{p.stock} units</span>
+                                </div>
+                              </div>
+                              <button className="btn-sm btn-accent">Reorder</button>
+                            </div>
+                          );
+                        })}
+                        {lowStockProducts.length === 0 && (
+                          <div style={{ textAlign: "center", padding: 40, color: DS.colors.textMuted }}>✅ All stock levels are healthy</div>
+                        )}
+                      </div>
+                    </>
+                  );
+                })()}
               </>
             )}
           </>
@@ -2721,6 +2847,53 @@ function ManagerView({ user }) {
           </>
         )}
       </div>
+
+      {/* ── PRODUCT EDIT MODAL ── */}
+      {editingProduct && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(10,10,15,0.75)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ background: DS.colors.surface, border: `1px solid ${DS.colors.border}`, borderRadius: 16, padding: 32, width: 400, boxShadow: "0 8px 40px rgba(0,0,0,0.6)" }}>
+            <div style={{ fontSize: 18, fontWeight: 700, color: DS.colors.white, marginBottom: 4 }}>Edit Product</div>
+            <div style={{ fontSize: 13, color: DS.colors.textMuted, marginBottom: 24 }}>{editingProduct.name}</div>
+            <div>
+              <div style={{ fontSize: 12, color: DS.colors.textMuted, marginBottom: 6 }}>LOW STOCK ALERT THRESHOLD</div>
+              <div style={{ fontSize: 12, color: DS.colors.textSub, marginBottom: 8 }}>
+                Category default: ≤{LOW_STOCK_THRESHOLDS[editingProduct.category] || LOW_STOCK_THRESHOLDS.default} units. Leave blank to use the default.
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <input
+                  type="number" min="0"
+                  placeholder={`Default: ${LOW_STOCK_THRESHOLDS[editingProduct.category] || LOW_STOCK_THRESHOLDS.default}`}
+                  value={editingProduct.thresholdInput}
+                  onChange={e => setEditingProduct(p => ({ ...p, thresholdInput: e.target.value }))}
+                  style={{ width: 100, padding: "8px 12px", borderRadius: 8, border: `1px solid ${DS.colors.border}`, background: DS.colors.bg, color: DS.colors.white, fontSize: 14, fontFamily: "inherit" }}
+                />
+                <span style={{ fontSize: 13, color: DS.colors.textMuted }}>units</span>
+                {editingProduct.thresholdInput !== "" && (
+                  <button onClick={() => setEditingProduct(p => ({ ...p, thresholdInput: "" }))}
+                    style={{ fontSize: 12, color: DS.colors.textMuted, background: "transparent", border: "none", cursor: "pointer" }}>
+                    Reset to default
+                  </button>
+                )}
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10, marginTop: 24 }}>
+              <button onClick={() => setEditingProduct(null)} style={{ flex: 1, padding: "12px 0", borderRadius: 8, border: `1px solid ${DS.colors.border}`, background: "transparent", color: DS.colors.textMuted, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>Cancel</button>
+              <button disabled={savingProduct} onClick={async () => {
+                setSavingProduct(true);
+                const threshold = editingProduct.thresholdInput === "" ? null : parseInt(editingProduct.thresholdInput, 10);
+                const { error } = await supabase.from("products").update({ low_stock_threshold: threshold }).eq("id", editingProduct.id);
+                if (!error) {
+                  setProducts(ps => ps.map(p => p.id === editingProduct.id ? { ...p, low_stock_threshold: threshold } : p));
+                  setEditingProduct(null);
+                }
+                setSavingProduct(false);
+              }} style={{ flex: 1, padding: "12px 0", borderRadius: 8, border: "none", background: DS.colors.accent, color: DS.colors.bg, fontSize: 13, fontWeight: 700, cursor: savingProduct ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                {savingProduct ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
