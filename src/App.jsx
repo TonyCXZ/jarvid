@@ -2006,26 +2006,44 @@ function ManagerView({ user }) {
               return (
                 <>
                   {/* Summary stats */}
-                  <div className="stats-row">
-                    <div className="stat-card">
-                      <div className="stat-label">All-time Revenue</div>
-                      <div className="stat-value" style={{ fontSize: 20 }}>{fmt(penceToGBP(totalRevenue))}</div>
-                    </div>
-                    <div className="stat-card">
-                      <div className="stat-label">Your All-time Profit</div>
-                      <div className="stat-value" style={{ fontSize: 20, color: DS.colors.accent }}>{fmt(penceToGBP(analyticsData.reduce((s, d) => s + (d.venueProfit || 0), 0)))}</div>
-                      <div className="stat-sub" style={{ fontSize: 10, color: DS.colors.textMuted }}>ex VAT · {100 - jarvidPct}% share</div>
-                    </div>
-                    <div className="stat-card">
-                      <div className="stat-label">All-time Orders</div>
-                      <div className="stat-value" style={{ fontSize: 20 }}>{totalOrders}</div>
-                    </div>
-                    <div className="stat-card">
-                      <div className="stat-label">Best {analyticsView === "weekly" ? "Week" : "Month"}</div>
-                      <div className="stat-value" style={{ fontSize: 20 }}>{fmt(penceToGBP(bestPeriod.revenue))}</div>
-                      <div className="stat-delta delta-up">{bestPeriod.label}</div>
-                    </div>
-                  </div>
+                  {(() => {
+                    const totalProfit = analyticsData.reduce((s, d) => s + (d.venueProfit || 0), 0);
+                    const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
+                    const avgOrderProfit = totalOrders > 0 ? totalProfit / totalOrders : 0;
+                    const bestProfitPeriod = analyticsData.reduce((best, d) => (d.venueProfit || 0) > (best.venueProfit || 0) ? d : best, analyticsData[0] || {});
+                    return (
+                      <div className="stats-row">
+                        <div className="stat-card">
+                          <div className="stat-label">All-time Revenue</div>
+                          <div className="stat-value" style={{ fontSize: 20 }}>{fmt(penceToGBP(totalRevenue))}</div>
+                          <div style={{ marginTop: 6, paddingTop: 6, borderTop: `1px solid ${DS.colors.border}` }}>
+                            <div className="stat-label" style={{ fontSize: 10 }}>Your Profit</div>
+                            <div style={{ fontSize: 16, fontWeight: 700, color: DS.colors.accent }}>{fmt(penceToGBP(totalProfit))}</div>
+                            <div style={{ fontSize: 10, color: DS.colors.textMuted }}>{100 - jarvidPct}% share · ex VAT</div>
+                          </div>
+                        </div>
+                        <div className="stat-card">
+                          <div className="stat-label">All-time Orders</div>
+                          <div className="stat-value" style={{ fontSize: 20 }}>{totalOrders}</div>
+                          <div style={{ marginTop: 6, paddingTop: 6, borderTop: `1px solid ${DS.colors.border}` }}>
+                            <div className="stat-label" style={{ fontSize: 10 }}>Avg Order Profit</div>
+                            <div style={{ fontSize: 16, fontWeight: 700, color: DS.colors.accent }}>{fmt(penceToGBP(avgOrderProfit))}</div>
+                            <div style={{ fontSize: 10, color: DS.colors.textMuted }}>avg revenue {fmt(penceToGBP(avgOrderValue))}</div>
+                          </div>
+                        </div>
+                        <div className="stat-card">
+                          <div className="stat-label">Best {analyticsView === "weekly" ? "Week" : "Month"} Revenue</div>
+                          <div className="stat-value" style={{ fontSize: 20 }}>{fmt(penceToGBP(bestPeriod.revenue))}</div>
+                          <div className="stat-delta delta-up">{bestPeriod.label}</div>
+                          <div style={{ marginTop: 6, paddingTop: 6, borderTop: `1px solid ${DS.colors.border}` }}>
+                            <div className="stat-label" style={{ fontSize: 10 }}>Best {analyticsView === "weekly" ? "Week" : "Month"} Profit</div>
+                            <div style={{ fontSize: 16, fontWeight: 700, color: DS.colors.accent }}>{fmt(penceToGBP(bestProfitPeriod.venueProfit || 0))}</div>
+                            <div style={{ fontSize: 10, color: DS.colors.textMuted }}>{bestProfitPeriod.label}</div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* Bar charts — Revenue + Profit side by side */}
                   {(() => {
