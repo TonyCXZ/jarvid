@@ -1670,26 +1670,41 @@ function ManagerView({ user }) {
 
     const allOrders = ordersData || [];
     const allOrderIds = allOrders.map(o => o.id);
+    console.log("[JarvID] allOrders count:", allOrders.length, "VENUE_ID:", VENUE_ID);
 
-    // Fetch items directly by order IDs — avoids unreliable nested join filtering
+    // Fetch items via two separate queries to avoid PostgREST join issues
     let itemsByOrder = {};
     if (allOrderIds.length > 0) {
       const { data: itemsData, error: itemsError } = await supabase
         .from("order_items")
-        .select("order_id, quantity, unit_price_pence, products(supply_price_pence)")
+        .select("order_id, quantity, unit_price_pence, product_id")
         .in("order_id", allOrderIds);
-      console.log("[JarvID] itemsData sample:", JSON.stringify((itemsData || []).slice(0, 2)));
-      console.log("[JarvID] itemsError:", itemsError);
-      (itemsData || []).forEach(item => {
-        const oid = item.order_id;
-        if (!itemsByOrder[oid]) itemsByOrder[oid] = [];
-        itemsByOrder[oid].push(item);
-      });
+      console.log("[JarvID] itemsData count:", (itemsData || []).length, "error:", itemsError?.message);
+
+      if (itemsData && itemsData.length > 0) {
+        const productIds = [...new Set(itemsData.map(i => i.product_id))];
+        const { data: productsData, error: prodError } = await supabase
+          .from("products")
+          .select("id, supply_price_pence")
+          .in("id", productIds);
+        console.log("[JarvID] productsData:", JSON.stringify((productsData || []).slice(0, 3)), "error:", prodError?.message);
+
+        const supplyMap = {};
+        (productsData || []).forEach(p => { supplyMap[p.id] = p.supply_price_pence || 0; });
+
+        itemsData.forEach(item => {
+          const oid = item.order_id;
+          if (!itemsByOrder[oid]) itemsByOrder[oid] = [];
+          itemsByOrder[oid].push({
+            ...item,
+            products: { supply_price_pence: supplyMap[item.product_id] || 0 },
+          });
+        });
+      }
     }
 
     const getPeriodProfit = (orderIds) => {
       const items = orderIds.flatMap(id => itemsByOrder[id] || []);
-      if (items.length > 0) console.log("[JarvID] sample item for profit calc:", JSON.stringify(items[0]));
       return calcProfit(items, jarvidPct);
     };
 
