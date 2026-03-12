@@ -1346,8 +1346,18 @@ function StaffView({ user, kioskoidMode, venueIdOverride, kioskPin: kioskPinProp
             </button>
           ))}
         </div>
-        <div style={{ fontSize: 13, color: DS.colors.textSub }}>
-          🟢 {pendingCount} pending · {orders.filter(o => o.status === "preparing").length} preparing
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ fontSize: 13, color: DS.colors.textSub }}>
+            🟢 {pendingCount} pending · {orders.filter(o => o.status === "preparing").length} preparing
+          </div>
+          {kioskoidMode && (
+            <button onClick={() => setStaffLocked(true)} style={{
+              padding: "6px 12px", borderRadius: 8, border: `1px solid ${DS.colors.border}`,
+              background: DS.colors.surface, color: DS.colors.textSub,
+              fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+              display: "flex", alignItems: "center", gap: 5,
+            }}>🔒 Lock</button>
+          )}
         </div>
       </div>
 
