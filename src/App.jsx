@@ -1131,7 +1131,7 @@ function KioskView({ venueId: propVenueId }) {
 // ============================================================
 // STAFF VIEW — live orders from Supabase with realtime
 // ============================================================
-function StaffView({ user, kioskoidMode, venueIdOverride, kioskPin: kioskPinProp }) {
+function StaffView({ user, kioskoidMode, venueIdOverride, kioskPin: kioskPinProp, onUnlock }) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all");
@@ -1149,7 +1149,22 @@ function StaffView({ user, kioskoidMode, venueIdOverride, kioskPin: kioskPinProp
   const [staffPinError, setStaffPinError] = useState("");
   const [staffPinShake, setStaffPinShake] = useState(false);
   const [pendingAction, setPendingAction] = useState(null); // { id, status }
+  const [logoTapCount, setLogoTapCount] = useState(0);
+  const logoTapTimer = useRef(null);
   const inactivityTimer = useRef(null);
+
+  const handleLogoTap = () => {
+    if (!kioskoidMode) return;
+    const newCount = logoTapCount + 1;
+    setLogoTapCount(newCount);
+    clearTimeout(logoTapTimer.current);
+    if (newCount >= 5) {
+      setLogoTapCount(0);
+      if (onUnlock) onUnlock();
+    } else {
+      logoTapTimer.current = setTimeout(() => setLogoTapCount(0), 2000);
+    }
+  };
 
   const resetInactivityTimer = useCallback(() => {
     clearTimeout(inactivityTimer.current);
@@ -1320,7 +1335,7 @@ function StaffView({ user, kioskoidMode, venueIdOverride, kioskPin: kioskPinProp
     <div className="staff-layout">
       <div className="staff-header">
         <div>
-          <div className="staff-heading">STAFF ORDERS</div>
+          <div className="staff-heading" onClick={handleLogoTap} style={{ cursor: kioskoidMode ? "pointer" : "default", userSelect: "none" }}>STAFF ORDERS</div>
           <div className="staff-meta">Live Queue · {loading ? "Loading…" : `${orders.length} total`}</div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
@@ -2993,7 +3008,7 @@ function AdminView() {
 // ============================================================
 // LOGIN SCREEN
 // ============================================================
-function LoginScreen({ onLogin }) {
+function LoginScreen({ onLogin, onBack }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -3048,6 +3063,13 @@ function LoginScreen({ onLogin }) {
         <div style={{ fontSize: 12, color: "#555570", textAlign: "center" }}>
           This portal is for authorised staff only.<br />Customer kiosk does not require login.
         </div>
+        {onBack && (
+          <button onClick={onBack} style={{
+            marginTop: 8, width: "100%", padding: "10px 0", borderRadius: 8,
+            border: `1px solid ${DS.colors.border}`, background: "transparent",
+            color: DS.colors.textMuted, fontSize: 13, cursor: "pointer", fontFamily: "inherit"
+          }}>← Back to Orders</button>
+        )}
       </div>
     </div>
   );
@@ -3205,6 +3227,7 @@ export default function App() {
 
   // Staff tablet mode — render StaffView directly, no login, PIN gates actions
   if (isStaffMode && kioskVenueId && kioskPin) {
+    if (showLogin) return <><GlobalStyles /><LoginScreen onLogin={handleLogin} onBack={() => setShowLogin(false)} /></>;
     return (
       <>
         <GlobalStyles />
@@ -3213,6 +3236,7 @@ export default function App() {
           kioskoidMode={true}
           venueIdOverride={kioskVenueId}
           kioskPin={kioskPin}
+          onUnlock={() => setShowLogin(true)}
         />
       </>
     );
