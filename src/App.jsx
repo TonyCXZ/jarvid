@@ -209,9 +209,15 @@ const GlobalStyles = () => (
     .orders-grid { flex: 1; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; padding: 20px; }
     .order-card { background: ${DS.colors.card}; border: 1px solid ${DS.colors.border}; border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 14px; transition: border-color 0.2s; }
     .order-card.pending { border-left: 4px solid ${DS.colors.warn}; }
+    .order-card.pending.timeout-amber { border-left: 4px solid ${DS.colors.warn}; border-color: ${DS.colors.warn}; background: rgba(230,168,0,0.07); animation: none; }
+    .order-card.pending.timeout-red { border-left: 4px solid ${DS.colors.danger}; border-color: ${DS.colors.danger}; background: rgba(192,57,43,0.1); animation: pulseRed 2s ease-in-out infinite; }
     .order-card.preparing { border-left: 4px solid ${DS.colors.blue}; }
     .order-card.completed { border-left: 4px solid ${DS.colors.accent}; opacity: 0.6; }
     .order-card.rejected { border-left: 4px solid ${DS.colors.danger}; opacity: 0.5; }
+    @keyframes pulseRed { 0%,100% { box-shadow: 0 0 0 0 rgba(192,57,43,0); } 50% { box-shadow: 0 0 0 6px rgba(192,57,43,0.15); } }
+    .timeout-badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; font-family: monospace; letter-spacing: 0.5px; }
+    .timeout-badge.amber { background: rgba(230,168,0,0.15); color: ${DS.colors.warn}; border: 1px solid rgba(230,168,0,0.3); }
+    .timeout-badge.red { background: rgba(192,57,43,0.2); color: ${DS.colors.danger}; border: 1px solid rgba(192,57,43,0.4); }
     .order-header { display: flex; align-items: center; justify-content: space-between; }
     .order-id-tag { font-family: ${DS.font.mono}; font-size: 14px; font-weight: 600; color: ${DS.colors.accent}; }
     .status-pill { padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
@@ -1429,6 +1435,15 @@ function StaffView({ user, kioskoidMode, venueIdOverride, kioskPin: kioskPinProp
   const [rejectReason, setRejectReason] = useState("");
   const [rejectOther, setRejectOther] = useState("");
 
+  // Live clock for timeout highlighting — ticks every 10s
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 10000);
+    return () => clearInterval(t);
+  }, []);
+  const TIMEOUT_AMBER_MS = 2 * 60 * 1000;  // 2 minutes
+  const TIMEOUT_RED_MS   = 4 * 60 * 1000;  // 4 minutes
+
   const REJECT_REASONS = [
     "Failed manual ID check",
     "Customer refused service",
@@ -1687,11 +1702,26 @@ function StaffView({ user, kioskoidMode, venueIdOverride, kioskPin: kioskPinProp
           const total = items.reduce((s, i) => s + (i.unit_price_pence * i.quantity), 0);
           const verifyMethod = order.age_verifications?.method || "Unknown";
 
+          // Timeout highlighting for pending orders only
+          const ageMs = order.status === "pending" ? now - new Date(order.created_at).getTime() : 0;
+          const timeoutClass = ageMs >= TIMEOUT_RED_MS ? "timeout-red" : ageMs >= TIMEOUT_AMBER_MS ? "timeout-amber" : "";
+          const ageMinutes = Math.floor(ageMs / 60000);
+          const ageSeconds = Math.floor((ageMs % 60000) / 1000);
+          const ageLabel = ageMs >= 60000 ? `${ageMinutes}m ${ageSeconds}s` : `${ageSeconds}s`;
+
           return (
-            <div key={order.id} className={`order-card ${order.status}`}>
+            <div key={order.id} className={`order-card ${order.status} ${timeoutClass}`}>
               <div className="order-header">
                 <div className="order-id-tag">#{order.id.slice(0, 8).toUpperCase()}</div>
-                <div className={`status-pill status-${order.status}`}>{order.status}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  {timeoutClass === "timeout-red" && (
+                    <span className="timeout-badge red">⚠ {ageLabel}</span>
+                  )}
+                  {timeoutClass === "timeout-amber" && (
+                    <span className="timeout-badge amber">⏱ {ageLabel}</span>
+                  )}
+                  <div className={`status-pill status-${order.status}`}>{order.status}</div>
+                </div>
               </div>
               <div className="order-items-list">
                 {items.map((item, i) => (
