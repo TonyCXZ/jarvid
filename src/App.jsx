@@ -1131,7 +1131,7 @@ function KioskView({ venueId: propVenueId }) {
 // ============================================================
 // STAFF VIEW — live orders from Supabase with realtime
 // ============================================================
-function StaffView({ user }) {
+function StaffView({ user, kioskoidMode, venueIdOverride, kioskPin: kioskPinProp }) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all");
@@ -1141,6 +1141,65 @@ function StaffView({ user }) {
   const knownOrderIds = useRef(new Set());
   const isFirstLoad = useRef(true);
   const soundEnabled_ref = useRef(true);
+
+  // Staff PIN lock — locks after 30min inactivity, never blocks view/sounds
+  const INACTIVITY_MS = 30 * 60 * 1000;
+  const [staffLocked, setStaffLocked] = useState(false);
+  const [staffPinEntry, setStaffPinEntry] = useState("");
+  const [staffPinError, setStaffPinError] = useState("");
+  const [staffPinShake, setStaffPinShake] = useState(false);
+  const [pendingAction, setPendingAction] = useState(null); // { id, status }
+  const inactivityTimer = useRef(null);
+
+  const resetInactivityTimer = useCallback(() => {
+    clearTimeout(inactivityTimer.current);
+    inactivityTimer.current = setTimeout(() => setStaffLocked(true), INACTIVITY_MS);
+  }, []);
+
+  useEffect(() => {
+    if (!kioskoidMode) return;
+    resetInactivityTimer();
+    const events = ["mousedown", "touchstart", "keydown"];
+    const handler = () => { if (!staffLocked) resetInactivityTimer(); };
+    events.forEach(e => window.addEventListener(e, handler));
+    return () => {
+      clearTimeout(inactivityTimer.current);
+      events.forEach(e => window.removeEventListener(e, handler));
+    };
+  }, [kioskoidMode, staffLocked, resetInactivityTimer]);
+
+  const handleStaffAction = (id, status) => {
+    if (kioskoidMode && staffLocked) {
+      setPendingAction({ id, status });
+      setStaffPinEntry("");
+      setStaffPinError("");
+      return;
+    }
+    updateStatus(id, status);
+  };
+
+  const handleStaffPinKey = (key) => {
+    if (key === "clear") { setStaffPinEntry(""); setStaffPinError(""); return; }
+    if (key === "back") { setStaffPinEntry(p => p.slice(0, -1)); setStaffPinError(""); return; }
+    const next = staffPinEntry + key;
+    setStaffPinEntry(next);
+    if (next.length === 4) {
+      if (next === (kioskPinProp || "1234")) {
+        setStaffLocked(false);
+        setStaffPinEntry("");
+        setStaffPinError("");
+        resetInactivityTimer();
+        if (pendingAction) {
+          updateStatus(pendingAction.id, pendingAction.status);
+          setPendingAction(null);
+        }
+      } else {
+        setStaffPinError("Incorrect PIN");
+        setStaffPinShake(true);
+        setTimeout(() => { setStaffPinEntry(""); setStaffPinShake(false); }, 600);
+      }
+    }
+  };
 
   useEffect(() => { soundEnabled_ref.current = soundEnabled; }, [soundEnabled]);
 
@@ -1171,13 +1230,15 @@ function StaffView({ user }) {
   };
 
   useEffect(() => {
-    if (user?.venue_id) {
-      supabase.from("venues").select("name").eq("id", user.venue_id).single()
+    const vid = venueIdOverride || user?.venue_id;
+    if (vid) {
+      supabase.from("venues").select("name").eq("id", vid).single()
         .then(({ data }) => { if (data) setVenueName(data.name); });
     }
-  }, [user?.venue_id]);
+  }, [user?.venue_id, venueIdOverride]);
 
   const loadOrders = useCallback(async () => {
+    const vid = venueIdOverride || user?.venue_id;
     try {
       let query = supabase
         .from("orders")
@@ -1193,7 +1254,7 @@ function StaffView({ user }) {
         .order("created_at", { ascending: false })
         .limit(50);
 
-      if (user?.venue_id) query = query.eq("venue_id", user.venue_id);
+      if (vid) query = query.eq("venue_id", vid);
 
       const { data, error: err } = await query;
       if (err) throw err;
@@ -1229,7 +1290,7 @@ function StaffView({ user }) {
       .subscribe();
 
     return () => supabase.removeChannel(channel);
-  }, [loadOrders]);
+  }, [loadOrders, venueIdOverride]);
 
   const updateStatus = async (id, status) => {
     const { error: err } = await supabase
@@ -1314,12 +1375,12 @@ function StaffView({ user }) {
               <div className="order-actions">
                 {order.status === "pending" && (
                   <>
-                    <button className="btn-action btn-approve" onClick={() => updateStatus(order.id, "preparing")}>✓ Prepare</button>
-                    <button className="btn-action btn-reject" onClick={() => updateStatus(order.id, "rejected")}>✕ Reject</button>
+                    <button className="btn-action btn-approve" onClick={() => handleStaffAction(order.id, "preparing")}>✓ Prepare</button>
+                    <button className="btn-action btn-reject" onClick={() => handleStaffAction(order.id, "rejected")}>✕ Reject</button>
                   </>
                 )}
                 {order.status === "preparing" && (
-                  <button className="btn-action btn-complete" onClick={() => updateStatus(order.id, "completed")}>✅ Mark Fulfilled</button>
+                  <button className="btn-action btn-complete" onClick={() => handleStaffAction(order.id, "completed")}>✅ Mark Fulfilled</button>
                 )}
                 {order.status === "completed" && (
                   <div style={{ fontSize: 13, color: DS.colors.accent, textAlign: "center", width: "100%" }}>✅ Fulfilled · Customer collected</div>
@@ -1338,6 +1399,61 @@ function StaffView({ user }) {
           </div>
         )}
       </div>
+
+      {/* Staff PIN lock overlay — dims but never hides orders */}
+      {kioskoidMode && staffLocked && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 999,
+          background: "rgba(10,10,15,0.55)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          <div style={{
+            background: DS.colors.surface, border: `1px solid ${DS.colors.border}`,
+            borderRadius: 16, padding: 36, width: 320, textAlign: "center",
+            boxShadow: "0 8px 40px rgba(0,0,0,0.6)"
+          }}>
+            <div style={{ fontSize: 28, marginBottom: 4 }}>🔒</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: DS.colors.white, marginBottom: 4 }}>
+              {pendingAction ? "PIN required to update order" : "Staff terminal locked"}
+            </div>
+            <div style={{ fontSize: 13, color: DS.colors.textMuted, marginBottom: 24 }}>
+              {pendingAction ? `Marking order as ${pendingAction.status}` : "Enter PIN to perform actions"}
+            </div>
+            <div style={{
+              display: "flex", justifyContent: "center", gap: 10, marginBottom: 20,
+              animation: staffPinShake ? "shake 0.4s ease" : "none"
+            }}>
+              {[0,1,2,3].map(i => (
+                <div key={i} style={{
+                  width: 14, height: 14, borderRadius: "50%",
+                  background: staffPinEntry.length > i ? DS.colors.accent : DS.colors.border,
+                  transition: "background 0.15s"
+                }} />
+              ))}
+            </div>
+            {staffPinError && <div style={{ color: DS.colors.danger, fontSize: 13, marginBottom: 12 }}>{staffPinError}</div>}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+              {["1","2","3","4","5","6","7","8","9","clear","0","back"].map(k => (
+                <button key={k} onClick={() => handleStaffPinKey(k)} style={{
+                  padding: "14px 0", borderRadius: 10, border: `1px solid ${DS.colors.border}`,
+                  background: k === "clear" || k === "back" ? DS.colors.bg : DS.colors.surface,
+                  color: DS.colors.white, fontSize: k === "clear" || k === "back" ? 11 : 20,
+                  fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+                }}>
+                  {k === "back" ? "⌫" : k === "clear" ? "CLR" : k}
+                </button>
+              ))}
+            </div>
+            {pendingAction && (
+              <button onClick={() => { setPendingAction(null); }} style={{
+                marginTop: 16, width: "100%", padding: "10px 0", borderRadius: 8,
+                border: `1px solid ${DS.colors.border}`, background: "transparent",
+                color: DS.colors.textMuted, fontSize: 13, cursor: "pointer"
+              }}>Cancel</button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -3087,6 +3203,21 @@ export default function App() {
 
   if (!authChecked) return <><GlobalStyles /><div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "#0a0a0f" }}><div className="spinner" /></div></>;
 
+  // Staff tablet mode — render StaffView directly, no login, PIN gates actions
+  if (isStaffMode && kioskVenueId && kioskPin) {
+    return (
+      <>
+        <GlobalStyles />
+        <StaffView
+          user={null}
+          kioskoidMode={true}
+          venueIdOverride={kioskVenueId}
+          kioskPin={kioskPin}
+        />
+      </>
+    );
+  }
+
   if (showLogin) return <><GlobalStyles /><LoginScreen onLogin={handleLogin} /></>;
 
 
@@ -3166,7 +3297,7 @@ export default function App() {
         </nav>
         <div className="main-content">
           {activeTab === "kiosk" && <KioskView venueId={kioskVenueId} />}
-          {activeTab === "staff" && (user ? <StaffView user={user} /> : <LoginScreen onLogin={handleLogin} />)}
+          {activeTab === "staff" && (user ? <StaffView user={user} kioskoidMode={false} /> : <LoginScreen onLogin={handleLogin} />)}
           {activeTab === "manager" && ((isManager || isOrgAdmin || isAdmin) ? <ManagerView user={user} /> : (
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", flexDirection: "column", gap: 16, color: DS.colors.textMuted }}>
               <div style={{ fontSize: 48 }}>🔒</div>
