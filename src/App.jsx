@@ -1149,6 +1149,40 @@ function StaffView({ user, kioskoidMode, venueIdOverride, kioskPin: kioskPinProp
   const [staffPinError, setStaffPinError] = useState("");
   const [staffPinShake, setStaffPinShake] = useState(false);
   const [pendingAction, setPendingAction] = useState(null); // { id, status }
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [rejectOrderId, setRejectOrderId] = useState(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [rejectOther, setRejectOther] = useState("");
+
+  const REJECT_REASONS = [
+    "Failed manual ID check",
+    "Customer refused service",
+    "Stock error",
+    "Other",
+  ];
+
+  const handleRejectClick = (orderId) => {
+    setRejectOrderId(orderId);
+    setRejectReason("");
+    setRejectOther("");
+    setShowRejectModal(true);
+  };
+
+  const confirmReject = async () => {
+    if (!rejectReason) return;
+    const reason = rejectReason === "Other" ? (rejectOther.trim() || "Other") : rejectReason;
+    const { error: err } = await supabase
+      .from("orders")
+      .update({ status: "rejected", rejection_reason: reason })
+      .eq("id", rejectOrderId);
+    if (!err) {
+      setOrders(o => o.map(x => x.id === rejectOrderId ? { ...x, status: "rejected", rejection_reason: reason } : x));
+    }
+    setShowRejectModal(false);
+    setRejectOrderId(null);
+    setRejectReason("");
+    setRejectOther("");
+  };
   const [logoTapCount, setLogoTapCount] = useState(0);
   const logoTapTimer = useRef(null);
   const inactivityTimer = useRef(null);
@@ -1258,7 +1292,7 @@ function StaffView({ user, kioskoidMode, venueIdOverride, kioskPin: kioskPinProp
       let query = supabase
         .from("orders")
         .select(`
-          *,
+          *, rejection_reason,
           order_items (
             quantity,
             unit_price_pence,
@@ -1401,7 +1435,10 @@ function StaffView({ user, kioskoidMode, venueIdOverride, kioskPin: kioskPinProp
                 {order.status === "pending" && (
                   <>
                     <button className="btn-action btn-approve" onClick={() => handleStaffAction(order.id, "preparing")}>✓ Prepare</button>
-                    <button className="btn-action btn-reject" onClick={() => handleStaffAction(order.id, "rejected")}>✕ Reject</button>
+                    <button className="btn-action btn-reject" onClick={() => {
+                      if (kioskoidMode && staffLocked) { handleStaffAction(order.id, "rejected"); }
+                      else { handleRejectClick(order.id); }
+                    }}>✕ Reject</button>
                   </>
                 )}
                 {order.status === "preparing" && (
@@ -1411,7 +1448,14 @@ function StaffView({ user, kioskoidMode, venueIdOverride, kioskPin: kioskPinProp
                   <div style={{ fontSize: 13, color: DS.colors.accent, textAlign: "center", width: "100%" }}>✅ Fulfilled · Customer collected</div>
                 )}
                 {order.status === "rejected" && (
-                  <div style={{ fontSize: 13, color: DS.colors.danger, textAlign: "center", width: "100%" }}>✕ Order rejected</div>
+                  <div style={{ fontSize: 13, color: DS.colors.danger, textAlign: "center", width: "100%" }}>
+                    ✕ Order Rejected
+                    {order.rejection_reason && (
+                      <div style={{ fontSize: 11, color: DS.colors.textMuted, marginTop: 4 }}>
+                        Reason: {order.rejection_reason}
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
@@ -1424,6 +1468,64 @@ function StaffView({ user, kioskoidMode, venueIdOverride, kioskPin: kioskPinProp
           </div>
         )}
       </div>
+
+      {/* Reject reason modal */}
+      {showRejectModal && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 1001,
+          background: "rgba(10,10,15,0.75)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          <div style={{
+            background: DS.colors.surface, border: `1px solid ${DS.colors.border}`,
+            borderRadius: 16, padding: 32, width: 340, boxShadow: "0 8px 40px rgba(0,0,0,0.6)"
+          }}>
+            <div style={{ fontSize: 18, fontWeight: 700, color: DS.colors.white, marginBottom: 6 }}>Reject Order</div>
+            <div style={{ fontSize: 13, color: DS.colors.textMuted, marginBottom: 20 }}>Select a reason before confirming</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+              {REJECT_REASONS.map(r => (
+                <button key={r} onClick={() => setRejectReason(r)} style={{
+                  padding: "12px 16px", borderRadius: 10, textAlign: "left",
+                  border: `1px solid ${rejectReason === r ? DS.colors.danger : DS.colors.border}`,
+                  background: rejectReason === r ? DS.colors.dangerGlow : DS.colors.card,
+                  color: rejectReason === r ? DS.colors.danger : DS.colors.text,
+                  fontSize: 14, fontWeight: rejectReason === r ? 600 : 400,
+                  cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s",
+                }}>
+                  {r}
+                </button>
+              ))}
+            </div>
+            {rejectReason === "Other" && (
+              <input
+                placeholder="Enter reason…"
+                value={rejectOther}
+                onChange={e => setRejectOther(e.target.value)}
+                style={{
+                  width: "100%", padding: "10px 12px", borderRadius: 8, marginBottom: 16,
+                  border: `1px solid ${DS.colors.border}`, background: DS.colors.bg,
+                  color: DS.colors.white, fontSize: 13, fontFamily: "inherit",
+                  boxSizing: "border-box",
+                }}
+              />
+            )}
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => setShowRejectModal(false)} style={{
+                flex: 1, padding: "12px 0", borderRadius: 8,
+                border: `1px solid ${DS.colors.border}`, background: "transparent",
+                color: DS.colors.textMuted, fontSize: 13, cursor: "pointer", fontFamily: "inherit",
+              }}>Cancel</button>
+              <button onClick={confirmReject} disabled={!rejectReason || (rejectReason === "Other" && !rejectOther.trim())} style={{
+                flex: 1, padding: "12px 0", borderRadius: 8,
+                border: "none", background: rejectReason ? DS.colors.danger : DS.colors.border,
+                color: DS.colors.white, fontSize: 13, fontWeight: 700,
+                cursor: rejectReason ? "pointer" : "not-allowed", fontFamily: "inherit",
+                opacity: rejectReason ? 1 : 0.5,
+              }}>Confirm Reject</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Staff PIN lock overlay — dims but never hides orders */}
       {kioskoidMode && staffLocked && (
