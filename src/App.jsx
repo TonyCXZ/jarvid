@@ -1661,25 +1661,35 @@ function ManagerView({ user }) {
     setAnalyticsView(view);
     setAnalyticsSelected(null);
 
-    const [ordersRes, itemsRes] = await Promise.all([
-      supabase.from("orders").select("id, total_pence, status, created_at").eq("venue_id", VENUE_ID).eq("status", "completed").order("created_at", { ascending: true }),
-      supabase.from("order_items").select("quantity, unit_price_pence, products(supply_price_pence), orders!inner(id, venue_id, status, created_at)").eq("orders.venue_id", VENUE_ID).eq("orders.status", "completed"),
-    ]);
+    const { data: ordersData } = await supabase
+      .from("orders")
+      .select("id, total_pence, status, created_at")
+      .eq("venue_id", VENUE_ID)
+      .eq("status", "completed")
+      .order("created_at", { ascending: true });
 
-    const allOrders = ordersRes.data || [];
-    const allItems = itemsRes.data || [];
+    const allOrders = ordersData || [];
+    const allOrderIds = allOrders.map(o => o.id);
 
-    // Build a map of order_id → items for profit lookup
-    const itemsByOrder = {};
-    allItems.forEach(item => {
-      const oid = item.orders?.id;
-      if (!oid) return;
-      if (!itemsByOrder[oid]) itemsByOrder[oid] = [];
-      itemsByOrder[oid].push(item);
-    });
+    // Fetch items directly by order IDs — avoids unreliable nested join filtering
+    let itemsByOrder = {};
+    if (allOrderIds.length > 0) {
+      const { data: itemsData, error: itemsError } = await supabase
+        .from("order_items")
+        .select("order_id, quantity, unit_price_pence, products(supply_price_pence)")
+        .in("order_id", allOrderIds);
+      console.log("[JarvID] itemsData sample:", JSON.stringify((itemsData || []).slice(0, 2)));
+      console.log("[JarvID] itemsError:", itemsError);
+      (itemsData || []).forEach(item => {
+        const oid = item.order_id;
+        if (!itemsByOrder[oid]) itemsByOrder[oid] = [];
+        itemsByOrder[oid].push(item);
+      });
+    }
 
     const getPeriodProfit = (orderIds) => {
       const items = orderIds.flatMap(id => itemsByOrder[id] || []);
+      if (items.length > 0) console.log("[JarvID] sample item for profit calc:", JSON.stringify(items[0]));
       return calcProfit(items, jarvidPct);
     };
 
@@ -2002,26 +2012,46 @@ function ManagerView({ user }) {
                     </div>
                   </div>
 
-                  {/* Bar chart */}
-                  <div className="chart-card">
-                    <div className="chart-title">{analyticsView === "weekly" ? "Weekly" : "Monthly"} Revenue (£)</div>
-                    <div style={{ display: "flex", alignItems: "flex-end", gap: analyticsData.length > 20 ? 2 : 4, height: 120, marginTop: 8 }}>
-                      {analyticsData.map(d => (
-                        <div key={d.key} onClick={() => setAnalyticsSelected(analyticsSelected?.key === d.key ? null : d)}
-                          style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", cursor: "pointer", gap: 2 }}>
-                          <div style={{ fontSize: analyticsData.length > 16 ? 0 : 9, color: DS.colors.textSub }}>{d.revenue > 0 ? penceToGBP(d.revenue).toFixed(0) : ""}</div>
-                          <div style={{
-                            width: "100%", borderRadius: "3px 3px 0 0", minHeight: 4,
-                            height: `${(d.revenue / maxRev) * 90}px`,
-                            background: analyticsSelected?.key === d.key ? DS.colors.purple : DS.colors.accent,
-                            opacity: analyticsSelected && analyticsSelected.key !== d.key ? 0.35 : 0.85,
-                            transition: "all 0.2s"
-                          }} />
-                          <div style={{ fontSize: analyticsData.length > 20 ? 7 : 9, color: analyticsSelected?.key === d.key ? DS.colors.white : DS.colors.textMuted, whiteSpace: "nowrap" }}>{d.label}</div>
+                  {/* Bar charts — Revenue + Profit side by side */}
+                  {(() => {
+                    const maxProfit = Math.max(...analyticsData.map(d => d.venueProfit || 0), 1);
+                    const BarChart = ({ dataKey, max, color, label, formatVal }) => (
+                      <div className="chart-card" style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+                          <div className="chart-title" style={{ marginBottom: 0 }}>{analyticsView === "weekly" ? "Weekly" : "Monthly"} {label}</div>
+                          <div style={{ fontSize: 10, color: DS.colors.textMuted }}>click to compare</div>
                         </div>
-                      ))}
-                    </div>
-                  </div>
+                        <div style={{ display: "flex", alignItems: "flex-end", gap: analyticsData.length > 20 ? 2 : 4, height: 110, marginTop: 4 }}>
+                          {analyticsData.map(d => {
+                            const val = d[dataKey] || 0;
+                            const isSelected = analyticsSelected?.key === d.key;
+                            return (
+                              <div key={d.key} onClick={() => setAnalyticsSelected(isSelected ? null : d)}
+                                style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", cursor: "pointer", gap: 2 }}>
+                                <div style={{ fontSize: analyticsData.length > 16 ? 0 : 9, color: DS.colors.textSub }}>
+                                  {val > 0 ? penceToGBP(val).toFixed(0) : ""}
+                                </div>
+                                <div style={{
+                                  width: "100%", borderRadius: "3px 3px 0 0", minHeight: 4,
+                                  height: `${(val / max) * 90}px`,
+                                  background: isSelected ? DS.colors.purple : color,
+                                  opacity: analyticsSelected && !isSelected ? 0.35 : 0.85,
+                                  transition: "all 0.2s"
+                                }} />
+                                <div style={{ fontSize: analyticsData.length > 20 ? 7 : 9, color: isSelected ? DS.colors.white : DS.colors.textMuted, whiteSpace: "nowrap" }}>{d.label}</div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                    return (
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                        <BarChart dataKey="revenue" max={maxRev} color={DS.colors.textSub} label="Revenue (£)" />
+                        <BarChart dataKey="venueProfit" max={maxProfit} color={DS.colors.accent} label="Your Profit (£)" />
+                      </div>
+                    );
+                  })()}
 
                   {/* Comparison table */}
                   <div className="chart-card" style={{ padding: 0, overflow: "hidden" }}>
