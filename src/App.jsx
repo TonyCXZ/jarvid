@@ -411,7 +411,7 @@ function KioskWelcome({ onStart }) {
   return (
     <div className="welcome-screen">
       <div>
-        <div className="welcome-logo">J<span className="glow">arv</span>ID</div>
+        <div className="welcome-logo" style={{ fontSize: 52 }}>VAPE <span className="glow">&</span> NICOTINE KIOSK</div>
       </div>
       <div className="welcome-age-notice">
         ⚠️ This kiosk sells age-restricted products. You must be 18 or over to proceed.
