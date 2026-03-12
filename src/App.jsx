@@ -964,6 +964,59 @@ function KioskProgress({ step }) {
 // ============================================================
 // KIOSK VIEW
 // ============================================================
+// ── Kiosk offline overlay ─────────────────────────────────────
+function KioskOfflineOverlay() {
+  const [dots, setDots] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setDots(d => (d + 1) % 4), 600);
+    return () => clearInterval(t);
+  }, []);
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 9999,
+      background: "linear-gradient(160deg, #0a0a0f 0%, #0d1117 100%)",
+      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+      gap: 0,
+    }}>
+      {/* Animated signal icon */}
+      <div style={{ marginBottom: 36, position: "relative", width: 80, height: 80 }}>
+        <svg width="80" height="80" viewBox="0 0 80 80" fill="none">
+          {/* Outer arc — pulses */}
+          <path d="M12 52 Q40 8 68 52" stroke="#1a2a1a" strokeWidth="4" strokeLinecap="round" fill="none"
+            style={{ animation: "offlineArcPulse 2s ease-in-out infinite" }} />
+          {/* Mid arc */}
+          <path d="M21 58 Q40 22 59 58" stroke="#1a3a1a" strokeWidth="4" strokeLinecap="round" fill="none"
+            style={{ animation: "offlineArcPulse 2s ease-in-out infinite 0.3s" }} />
+          {/* Inner arc */}
+          <path d="M30 64 Q40 38 50 64" stroke="#1e4a1e" strokeWidth="4" strokeLinecap="round" fill="none"
+            style={{ animation: "offlineArcPulse 2s ease-in-out infinite 0.6s" }} />
+          {/* Centre dot */}
+          <circle cx="40" cy="68" r="4" fill="#39d353" opacity="0.6" />
+          {/* Cross overlay */}
+          <line x1="20" y1="20" x2="60" y2="60" stroke="#c0392b" strokeWidth="3" strokeLinecap="round" opacity="0.7" />
+          <line x1="60" y1="20" x2="20" y2="60" stroke="#c0392b" strokeWidth="3" strokeLinecap="round" opacity="0.7" />
+        </svg>
+      </div>
+      <div style={{ fontSize: 28, fontWeight: 800, color: "#fff", letterSpacing: 2, fontFamily: "monospace", marginBottom: 12 }}>
+        WE'LL BE RIGHT BACK
+      </div>
+      <div style={{ fontSize: 15, color: "#5a6a5a", maxWidth: 320, textAlign: "center", lineHeight: 1.6, marginBottom: 40 }}>
+        This kiosk is temporarily offline.<br />Please speak to a member of staff.
+      </div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#c0392b", animation: "offlinePulse 1.5s ease-in-out infinite" }} />
+        <span style={{ fontSize: 12, color: "#4a5a4a", letterSpacing: 2, fontFamily: "monospace" }}>
+          RECONNECTING{".".repeat(dots)}{"\u00a0".repeat(3 - dots)}
+        </span>
+      </div>
+      <style>{`
+        @keyframes offlinePulse { 0%,100% { opacity: 1; } 50% { opacity: 0.2; } }
+        @keyframes offlineArcPulse { 0%,100% { opacity: 0.3; } 50% { opacity: 1; } }
+      `}</style>
+    </div>
+  );
+}
+
 function KioskView({ venueId: propVenueId }) {
   const [screen, setScreen] = useState("welcome");
   const [cart, setCart] = useState({});
@@ -976,6 +1029,10 @@ function KioskView({ venueId: propVenueId }) {
   const countdownTimer = useRef(null);
   const heartbeatTimer = useRef(null);
   const [kioskDbId, setKioskDbId] = useState(null);
+  const [isOffline, setIsOffline] = useState(false);
+  const [offlineRetryCount, setOfflineRetryCount] = useState(0);
+  const offlineTimer = useRef(null);
+  const retryTimer = useRef(null);
 
   const INACTIVITY_SECONDS = 90;
   const WARNING_SECONDS = 30;
@@ -996,7 +1053,7 @@ function KioskView({ venueId: propVenueId }) {
 
   const sendHeartbeat = async (dbId, devId) => {
     if (!venueId) return;
-    await supabase.from("kiosks").upsert({
+    const { error } = await supabase.from("kiosks").upsert({
       id: dbId,
       device_id: devId,
       venue_id: venueId,
@@ -1005,6 +1062,10 @@ function KioskView({ venueId: propVenueId }) {
       last_heartbeat: new Date().toISOString(),
       app_version: "1.0.0",
     }, { onConflict: "device_id" });
+    if (!error) {
+      setIsOffline(false);
+      setOfflineRetryCount(0);
+    }
   };
 
   // Register kiosk and start heartbeat on mount
@@ -1033,6 +1094,44 @@ function KioskView({ venueId: propVenueId }) {
       }
     };
   }, [venueId]);
+
+  // ── Offline detection ──────────────────────────────────────
+  const checkSupabaseConn = useCallback(async () => {
+    try {
+      const { error } = await supabase.from("venues").select("id").limit(1);
+      if (error) throw error;
+      setIsOffline(false);
+      setOfflineRetryCount(0);
+    } catch {
+      setIsOffline(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleOnline = () => checkSupabaseConn();
+    const handleOffline = () => setIsOffline(true);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    // Also poll every 30s to catch silent failures (WiFi with no internet)
+    offlineTimer.current = setInterval(checkSupabaseConn, 30000);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+      clearInterval(offlineTimer.current);
+      clearTimeout(retryTimer.current);
+    };
+  }, [checkSupabaseConn]);
+
+  // Auto-retry with backoff when offline
+  useEffect(() => {
+    if (!isOffline) return;
+    const delay = Math.min(5000 * Math.pow(1.5, offlineRetryCount), 30000);
+    retryTimer.current = setTimeout(() => {
+      setOfflineRetryCount(c => c + 1);
+      checkSupabaseConn();
+    }, delay);
+    return () => clearTimeout(retryTimer.current);
+  }, [isOffline, offlineRetryCount, checkSupabaseConn]);
 
   const goHome = () => {
     setCart({});
@@ -1152,6 +1251,8 @@ function KioskView({ venueId: propVenueId }) {
           </button>
         </div>
       )}
+
+      {isOffline && <KioskOfflineOverlay />}
     </div>
   );
 }
