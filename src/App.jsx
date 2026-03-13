@@ -3828,10 +3828,10 @@ export default function App() {
     await supabase.auth.signOut();
     setUser(null);
     if (isStaffMode) {
-      // Staff tablet — return to login, never show kiosk
+      // Staff tablet — drop back to staff orders view, not login
       setActiveTab("kiosk");
       setKioskLocked(false);
-      setShowLogin(true);
+      setShowLogin(false);
     } else {
       // Kiosk tablet — lock back to kiosk mode
       setActiveTab("kiosk");
@@ -3844,7 +3844,11 @@ export default function App() {
   if (!authChecked) return <><GlobalStyles /><div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "#0a0a0f" }}><div className="spinner" /></div></>;
 
   // Staff tablet mode — render StaffView directly, no login, PIN gates actions
-  if (isStaffMode && kioskVenueId && kioskPin) {
+  // Exception: if a manager/admin/org_admin has logged in via the 5-tap flow,
+  // fall through to the full app so they get access to their assigned tabs.
+  const staffModeElevated = isStaffMode && user && ["manager", "org_admin", "admin"].includes(user.role);
+
+  if (isStaffMode && kioskVenueId && kioskPin && !staffModeElevated) {
     if (showLogin) return <><GlobalStyles /><LoginScreen onLogin={handleLogin} onBack={() => setShowLogin(false)} /></>;
     return (
       <>
