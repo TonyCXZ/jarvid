@@ -2027,6 +2027,8 @@ function ManagerView({ user }) {
   const [dayDetail, setDayDetail] = useState(null);
   const [loadingDayDetail, setLoadingDayDetail] = useState(false);
   const [analyticsView, setAnalyticsView] = useState("weekly");
+  const [firstOrderDate, setFirstOrderDate] = useState(null);
+  const [allTimeMode, setAllTimeMode] = useState(false);
   const [kioskStatuses, setKioskStatuses] = useState([]);
   const [jarvidPct, setJarvidPct] = useState(20);
   const [analyticsData, setAnalyticsData] = useState([]);
@@ -2359,6 +2361,9 @@ function ManagerView({ user }) {
     const allOrderIds = allOrders.map(o => o.id);
     console.log("[JarvID] allOrders count:", allOrders.length, "VENUE_ID:", VENUE_ID);
 
+    // Record first order date for smart chart slicing
+    if (allOrders.length > 0) setFirstOrderDate(new Date(allOrders[0].created_at));
+
     // Fetch items in chunks of 100 to avoid PostgREST URL length limits
     let itemsByOrder = {};
     if (allOrderIds.length > 0) {
@@ -2671,13 +2676,18 @@ function ManagerView({ user }) {
 
             {/* Toggle */}
             <div style={{ display: "flex", gap: 8, marginBottom: 4 }}>
-              {["weekly", "monthly"].map(v => (
-                <button key={v} className={`btn-sm ${analyticsView === v ? "btn-accent" : "btn-outline"}`}
-                  onClick={() => loadAnalytics(v)}
-                  style={{ textTransform: "capitalize", minWidth: 90 }}>
-                  {v === "weekly" ? "📅 Weekly" : "🗓 Monthly"}
+              {[["weekly","📅 Weekly"], ["monthly","🗓 Monthly"]].map(([v, label]) => (
+                <button key={v} className={`btn-sm ${analyticsView === v && !allTimeMode ? "btn-accent" : "btn-outline"}`}
+                  onClick={() => { setAllTimeMode(false); loadAnalytics(v); }}
+                  style={{ minWidth: 90 }}>
+                  {label}
                 </button>
               ))}
+              <button className={`btn-sm ${allTimeMode ? "btn-accent" : "btn-outline"}`}
+                onClick={() => setAllTimeMode(m => !m)}
+                style={{ minWidth: 90 }}>
+                📊 All-time
+              </button>
             </div>
 
             {loadingAnalytics ? (
@@ -2735,15 +2745,30 @@ function ManagerView({ user }) {
 
                   {/* Bar charts — Revenue + Profit side by side */}
                   {(() => {
-                    const maxProfit = Math.max(...analyticsData.map(d => d.venueProfit || 0), 1);
+                    // Determine how many periods since first order (up to 6), or all if allTimeMode
+                    let periodsToShow = analyticsData.length; // default: all available
+                    if (!allTimeMode && firstOrderDate) {
+                      const now = new Date();
+                      if (analyticsView === "monthly") {
+                        const monthsSince = (now.getFullYear() - firstOrderDate.getFullYear()) * 12
+                          + (now.getMonth() - firstOrderDate.getMonth()) + 1;
+                        periodsToShow = Math.min(monthsSince, 6);
+                      } else {
+                        const weeksSince = Math.ceil((now - firstOrderDate) / (7 * 24 * 60 * 60 * 1000));
+                        periodsToShow = Math.min(weeksSince, 6);
+                      }
+                    }
+                    const chartData = analyticsData.slice(-Math.max(periodsToShow, 1));
+                    const maxProfit = Math.max(...chartData.map(d => d.venueProfit || 0), 1);
+                    const maxRevChart = Math.max(...chartData.map(d => d.revenue || 0), 1);
                     const BarChart = ({ dataKey, max, color, label, formatVal }) => (
                       <div className="chart-card" style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
                           <div className="chart-title" style={{ marginBottom: 0 }}>{analyticsView === "weekly" ? "Weekly" : "Monthly"} {label}</div>
                           <div style={{ fontSize: 10, color: DS.colors.textMuted }}>click to compare</div>
                         </div>
-                        <div style={{ display: "flex", alignItems: "flex-end", gap: analyticsData.length > 20 ? 2 : 4, height: 110, marginTop: 4 }}>
-                          {analyticsData.map(d => {
+                        <div style={{ display: "flex", alignItems: "flex-end", gap: chartData.length > 24 ? 1 : chartData.length > 12 ? 2 : 4, height: 110, marginTop: 4 }}>
+                          {chartData.map(d => {
                             const val = d[dataKey] || 0;
                             const isSelected = analyticsSelected?.key === d.key;
                             return (
@@ -2759,7 +2784,7 @@ function ManagerView({ user }) {
                                   opacity: analyticsSelected && !isSelected ? 0.35 : 0.85,
                                   transition: "all 0.2s"
                                 }} />
-                                <div style={{ fontSize: analyticsData.length > 20 ? 7 : 9, color: isSelected ? DS.colors.white : DS.colors.textMuted, whiteSpace: "nowrap" }}>{d.label}</div>
+                                <div style={{ fontSize: chartData.length > 24 ? 6 : chartData.length > 12 ? 7 : 9, color: isSelected ? DS.colors.white : DS.colors.textMuted, whiteSpace: "nowrap", overflow: "hidden" }}>{chartData.length > 24 ? d.label.split(" ")[0] : d.label}</div>
                               </div>
                             );
                           })}
@@ -2767,10 +2792,18 @@ function ManagerView({ user }) {
                       </div>
                     );
                     return (
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-                        <BarChart dataKey="revenue" max={maxRev} color={DS.colors.textSub} label="Revenue (£)" />
-                        <BarChart dataKey="venueProfit" max={maxProfit} color={DS.colors.accent} label="Your Profit (£)" />
-                      </div>
+                      <>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                          <BarChart dataKey="revenue" max={maxRevChart} color={DS.colors.textSub} label="Revenue (£)" />
+                          <BarChart dataKey="venueProfit" max={maxProfit} color={DS.colors.accent} label="Your Profit (£)" />
+                        </div>
+                        <div style={{ fontSize: 11, color: DS.colors.textMuted, textAlign: "right", marginTop: -4 }}>
+                          {allTimeMode
+                            ? `Showing all ${chartData.length} ${analyticsView === "weekly" ? "weeks" : "months"} · all-time`
+                            : `Showing ${chartData.length} ${analyticsView === "weekly" ? `week${chartData.length !== 1 ? "s" : ""}` : `month${chartData.length !== 1 ? "s" : ""}`} since activation${analyticsData.length > chartData.length ? ` · ${analyticsData.length - chartData.length} earlier — switch to All-time to view` : ""}`
+                          }
+                        </div>
+                      </>
                     );
                   })()}
 
