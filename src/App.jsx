@@ -3402,97 +3402,265 @@ function DeviceMonitor({ venues }) {
 }
 
 // ============================================================
-// ADMIN VIEW (mostly static for now)
+// ADMIN VIEW
 // ============================================================
 function AdminView() {
   const [adminSection, setAdminSection] = useState("venues");
+
+  // Venues
   const [venues, setVenues] = useState([]);
   const [loadingVenues, setLoadingVenues] = useState(false);
+  const [venueForm, setVenueForm] = useState(null); // null | { mode: "new"|"edit", id? }
+  const [venueFormData, setVenueFormData] = useState({});
+  const [savingVenue, setSavingVenue] = useState(false);
+  const [deletingVenueId, setDeletingVenueId] = useState(null);
 
+  // Users
+  const [users, setUsers] = useState([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [userForm, setUserForm] = useState(null);
+  const [userFormData, setUserFormData] = useState({});
+  const [savingUser, setSavingUser] = useState(false);
+
+  // Stock
+  const [stockVenueId, setStockVenueId] = useState("all");
+  const [inventory, setInventory] = useState([]);
+  const [loadingInventory, setLoadingInventory] = useState(false);
+  const [editingStock, setEditingStock] = useState({});
+
+  // Purchasing
+  const [purchaseOrders, setPurchaseOrders] = useState([]);
+  const [loadingPOs, setLoadingPOs] = useState(false);
+  const [reorderAlerts, setReorderAlerts] = useState([]);
+  const [poForm, setPOForm] = useState(false);
+  const [poFormData, setPOFormData] = useState({ venue_id: "", supplier_email: "", notes: "", items: [] });
+  const [poVenueProducts, setPOVenueProducts] = useState([]);
+  const [expandedPO, setExpandedPO] = useState(null);
+
+  // Financials
   const [financials, setFinancials] = useState(null);
   const [loadingFinancials, setLoadingFinancials] = useState(false);
+  const [finDateFrom, setFinDateFrom] = useState("");
+  const [finDateTo, setFinDateTo] = useState("");
+  const [finAllTime, setFinAllTime] = useState(true);
+
+  // Billing
+  const [billing, setBilling] = useState([]);
+  const [loadingBilling, setLoadingBilling] = useState(false);
+  const [editingBilling, setEditingBilling] = useState(null);
+  const [billingFormData, setBillingFormData] = useState({});
+
+  // Load venues on mount (needed for dropdowns everywhere)
+  useEffect(() => { loadVenues(); }, []);
 
   useEffect(() => {
-    if (adminSection === "venues") loadVenues();
+    if (adminSection === "users") loadUsers();
+    if (adminSection === "stock") loadInventory();
+    if (adminSection === "purchasing") loadPurchasing();
     if (adminSection === "financials") loadFinancials();
+    if (adminSection === "billing") loadBilling();
   }, [adminSection]);
 
+  useEffect(() => {
+    if (adminSection === "stock") loadInventory();
+  }, [stockVenueId]);
+
+  // --- Shared styles ---
+  const inputStyle = { background: DS.colors.surface, border: `1px solid ${DS.colors.border}`, borderRadius: 6, padding: "7px 10px", color: DS.colors.text, fontSize: 13, fontFamily: DS.font.body, outline: "none", width: "100%" };
+  const labelStyle = { fontSize: 11, color: DS.colors.textMuted, marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.06em" };
+  const fieldStyle = { display: "flex", flexDirection: "column", gap: 4 };
+  const dangerBtnStyle = { background: DS.colors.dangerGlow, color: DS.colors.danger, border: `1px solid ${DS.colors.danger}`, borderRadius: 6, fontSize: 12, cursor: "pointer", padding: "5px 10px" };
+
+  // --- Load functions ---
+  const loadVenues = async () => {
+    setLoadingVenues(true);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const { data, error } = await supabase.from("venues").select("*").order("name");
+    if (error || !data?.length) { setVenues([]); setLoadingVenues(false); return; }
+    const revenueResults = await Promise.all(
+      data.map(v => supabase.from("orders").select("total_pence").eq("venue_id", v.id).eq("status", "completed").gte("created_at", today.toISOString()))
+    );
+    setVenues(data.map((v, i) => ({
+      ...v,
+      todaySales: penceToGBP((revenueResults[i]?.data || []).reduce((s, o) => s + (o.total_pence || 0), 0)),
+      status: "online",
+    })));
+    setLoadingVenues(false);
+  };
+
+  const saveVenue = async () => {
+    setSavingVenue(true);
+    const d = venueFormData;
+    const payload = { name: d.name, location: d.location, jarvid_profit_share_pct: Number(d.jarvid_profit_share_pct) || 20, supplier_email: d.supplier_email || null, subscription_plan: d.subscription_plan || "pro", monthly_fee_pence: Number(d.monthly_fee_pence) || 14900 };
+    const { error } = venueForm.mode === "new"
+      ? await supabase.from("venues").insert({ ...payload, org_id: d.org_id || null })
+      : await supabase.from("venues").update(payload).eq("id", venueForm.id);
+    if (!error) { setVenueForm(null); loadVenues(); } else alert("Error: " + error.message);
+    setSavingVenue(false);
+  };
+
+  const deleteVenue = async (id) => {
+    if (!window.confirm("Delete this venue? This cannot be undone.")) return;
+    setDeletingVenueId(id);
+    const { error } = await supabase.from("venues").delete().eq("id", id);
+    if (!error) loadVenues(); else alert("Error: " + error.message);
+    setDeletingVenueId(null);
+  };
+
+  // --- Users ---
+  const loadUsers = async () => {
+    setLoadingUsers(true);
+    const { data, error } = await supabase.from("staff_users").select("*, venues(name)").order("created_at", { ascending: false });
+    if (!error) setUsers(data || []);
+    setLoadingUsers(false);
+  };
+
+  const saveUser = async () => {
+    setSavingUser(true);
+    const d = userFormData;
+    const { error } = userForm.mode === "new"
+      ? await supabase.from("staff_users").insert({ email: d.email, role: d.role || "staff", venue_id: d.venue_id || null, org_id: d.org_id || null, is_active: true })
+      : await supabase.from("staff_users").update({ role: d.role, venue_id: d.venue_id || null, org_id: d.org_id || null }).eq("id", userForm.id);
+    if (!error) { setUserForm(null); loadUsers(); } else alert("Error: " + error.message);
+    setSavingUser(false);
+  };
+
+  const toggleUserActive = async (u) => {
+    await supabase.from("staff_users").update({ is_active: !u.is_active }).eq("id", u.id);
+    loadUsers();
+  };
+
+  const deleteUser = async (id) => {
+    if (!window.confirm("Remove this user? Their Supabase Auth account is not deleted.")) return;
+    await supabase.from("staff_users").delete().eq("id", id);
+    loadUsers();
+  };
+
+  // --- Stock ---
+  const loadInventory = async () => {
+    setLoadingInventory(true);
+    let q = supabase.from("inventory").select("*, products(id, name, category, low_stock_threshold), venues(name)").order("quantity");
+    if (stockVenueId && stockVenueId !== "all") q = q.eq("venue_id", stockVenueId);
+    const { data, error } = await q;
+    if (!error) setInventory(data || []);
+    setLoadingInventory(false);
+  };
+
+  const saveStockThresholds = async (inv) => {
+    const edit = editingStock[inv.id];
+    if (!edit) return;
+    await Promise.all([
+      edit.min !== undefined && inv.products?.id
+        ? supabase.from("products").update({ low_stock_threshold: Number(edit.min) }).eq("id", inv.products.id)
+        : Promise.resolve(),
+      edit.max !== undefined
+        ? supabase.from("inventory").update({ max_quantity: Number(edit.max) }).eq("id", inv.id)
+        : Promise.resolve(),
+    ]);
+    const s = { ...editingStock }; delete s[inv.id]; setEditingStock(s);
+    loadInventory();
+  };
+
+  const flagForReorder = async (inv) => {
+    const venueId = inv.venue_id || stockVenueId;
+    const { data: venue } = await supabase.from("venues").select("supplier_email").eq("id", venueId).single();
+    const { data: po, error } = await supabase.from("purchase_orders").insert({ venue_id: venueId, status: "draft", supplier_email: venue?.supplier_email || null, notes: `Auto-flagged: ${inv.products?.name} low stock` }).select().single();
+    if (!error && po) {
+      const threshold = inv.products?.low_stock_threshold || LOW_STOCK_THRESHOLDS.default;
+      const qty = inv.max_quantity ? Math.max(0, inv.max_quantity - (inv.quantity || 0)) : threshold * 3;
+      await supabase.from("purchase_order_items").insert({ po_id: po.id, product_id: inv.products?.id, quantity_ordered: qty });
+      alert(`Draft PO created for ${inv.products?.name}`);
+    }
+  };
+
+  // --- Purchasing ---
+  const loadPurchasing = async () => {
+    setLoadingPOs(true);
+    const [{ data: pos }, { data: alerts }] = await Promise.all([
+      supabase.from("purchase_orders").select("*, venues(name, supplier_email), purchase_order_items(*, products(name))").order("created_at", { ascending: false }),
+      supabase.from("inventory").select("*, products(id, name, low_stock_threshold), venues(name)").order("quantity"),
+    ]);
+    setPurchaseOrders(pos || []);
+    setReorderAlerts((alerts || []).filter(inv => (inv.quantity || 0) <= (inv.products?.low_stock_threshold || LOW_STOCK_THRESHOLDS.default)));
+    setLoadingPOs(false);
+  };
+
+  const loadPOVenueProducts = async (venueId) => {
+    if (!venueId) { setPOVenueProducts([]); return; }
+    const { data } = await supabase.from("products").select("id, name").eq("venue_id", venueId).order("name");
+    setPOVenueProducts(data || []);
+  };
+
+  const createPO = async (sendImmediately) => {
+    const d = poFormData;
+    if (!d.venue_id || !d.items?.length) { alert("Select a venue and add at least one item"); return; }
+    const { data: po, error } = await supabase.from("purchase_orders").insert({ venue_id: d.venue_id, status: sendImmediately ? "sent" : "draft", supplier_email: d.supplier_email || null, notes: d.notes || null }).select().single();
+    if (error) { alert("Error: " + error.message); return; }
+    await supabase.from("purchase_order_items").insert(d.items.map(it => ({ po_id: po.id, product_id: it.product_id || null, quantity_ordered: it.qty })));
+    if (sendImmediately) {
+      const body = d.items.map(it => `- ${it.name}: ${it.qty}`).join("\n");
+      window.open(`mailto:${d.supplier_email}?subject=${encodeURIComponent("Purchase Order — " + new Date().toLocaleDateString("en-GB"))}&body=${encodeURIComponent(body)}`);
+    }
+    setPOForm(false); setPOFormData({ venue_id: "", supplier_email: "", notes: "", items: [] });
+    loadPurchasing();
+  };
+
+  const markPOReceived = async (po) => {
+    if (!window.confirm("Mark as received? This will increment inventory for all line items.")) return;
+    await supabase.from("purchase_orders").update({ status: "received" }).eq("id", po.id);
+    for (const item of po.purchase_order_items || []) {
+      if (!item.product_id) continue;
+      const { data: existing } = await supabase.from("inventory").select("id, quantity").eq("product_id", item.product_id).eq("venue_id", po.venue_id).maybeSingle();
+      if (existing) await supabase.from("inventory").update({ quantity: (existing.quantity || 0) + item.quantity_ordered }).eq("id", existing.id);
+    }
+    loadPurchasing();
+  };
+
+  // --- Financials ---
   const loadFinancials = async () => {
     setLoadingFinancials(true);
-    // Load all venues with profit share %
     const { data: venuesData } = await supabase.from("venues").select("id, name, jarvid_profit_share_pct");
-    // Load all completed order items with supply prices across all venues
-    const { data: items } = await supabase
-      .from("order_items")
-      .select("quantity, unit_price_pence, products(supply_price_pence, jarvid_cost_pence), orders!inner(venue_id, status, created_at)")
-      .eq("orders.status", "completed");
-
+    let q = supabase.from("order_items").select("quantity, unit_price_pence, products(supply_price_pence, jarvid_cost_pence), orders!inner(venue_id, status, created_at)").eq("orders.status", "completed");
+    if (!finAllTime && finDateFrom) { const f = new Date(finDateFrom); f.setHours(0,0,0,0); q = q.gte("orders.created_at", f.toISOString()); }
+    if (!finAllTime && finDateTo) { const t = new Date(finDateTo); t.setHours(23,59,59,999); q = q.lte("orders.created_at", t.toISOString()); }
+    const { data: items } = await q;
     if (!venuesData || !items) { setLoadingFinancials(false); return; }
-
-    // Group items by venue
     const byVenue = {};
-    items.forEach(item => {
-      const vid = item.orders?.venue_id;
-      if (!vid) return;
-      if (!byVenue[vid]) byVenue[vid] = [];
-      byVenue[vid].push(item);
-    });
-
-    // Calculate per-venue financials
+    items.forEach(item => { const vid = item.orders?.venue_id; if (!vid) return; if (!byVenue[vid]) byVenue[vid] = []; byVenue[vid].push(item); });
     const venueFinancials = venuesData.map(v => {
-      const vItems = byVenue[v.id] || [];
-      const pct = v.jarvid_profit_share_pct || 20;
+      const vItems = byVenue[v.id] || []; const pct = v.jarvid_profit_share_pct || 20;
       let totalRevenue = 0, totalSupply = 0, totalJarvidCost = 0;
-      vItems.forEach(item => {
-        const qty = item.quantity || 1;
-        totalRevenue += (item.unit_price_pence || 0) * qty;
-        totalSupply += (item.products?.supply_price_pence || 0) * qty;
-        totalJarvidCost += (item.products?.jarvid_cost_pence || 0) * qty;
-      });
-      const grossProfit = totalRevenue - totalSupply;
-      const jarvidShare = Math.round(grossProfit * (pct / 100));
-      const venueShare = grossProfit - jarvidShare;
-      const jarvidMargin = totalSupply - totalJarvidCost; // markup revenue
-      return {
-        ...v,
-        totalRevenue,
-        grossProfit,
-        jarvidShare,
-        venueShare,
-        jarvidMargin,
-        jarvidTotal: jarvidShare + jarvidMargin, // total JarvID income = profit share + supply margin
-      };
+      vItems.forEach(item => { const qty = item.quantity || 1; totalRevenue += (item.unit_price_pence || 0) * qty; totalSupply += (item.products?.supply_price_pence || 0) * qty; totalJarvidCost += (item.products?.jarvid_cost_pence || 0) * qty; });
+      const grossProfit = totalRevenue - totalSupply; const jarvidShare = Math.round(grossProfit * (pct / 100));
+      return { ...v, totalRevenue, grossProfit, jarvidShare, venueShare: grossProfit - jarvidShare, jarvidMargin: totalSupply - totalJarvidCost, jarvidTotal: jarvidShare + (totalSupply - totalJarvidCost) };
     });
-
-    const platform = venueFinancials.reduce((s, v) => ({
-      totalRevenue: s.totalRevenue + v.totalRevenue,
-      grossProfit: s.grossProfit + v.grossProfit,
-      jarvidShare: s.jarvidShare + v.jarvidShare,
-      venueShare: s.venueShare + v.venueShare,
-      jarvidMargin: s.jarvidMargin + v.jarvidMargin,
-      jarvidTotal: s.jarvidTotal + v.jarvidTotal,
-    }), { totalRevenue: 0, grossProfit: 0, jarvidShare: 0, venueShare: 0, jarvidMargin: 0, jarvidTotal: 0 });
-
+    const platform = venueFinancials.reduce((s, v) => ({ totalRevenue: s.totalRevenue + v.totalRevenue, grossProfit: s.grossProfit + v.grossProfit, jarvidShare: s.jarvidShare + v.jarvidShare, venueShare: s.venueShare + v.venueShare, jarvidMargin: s.jarvidMargin + v.jarvidMargin, jarvidTotal: s.jarvidTotal + v.jarvidTotal }), { totalRevenue: 0, grossProfit: 0, jarvidShare: 0, venueShare: 0, jarvidMargin: 0, jarvidTotal: 0 });
     setFinancials({ venues: venueFinancials, platform });
     setLoadingFinancials(false);
   };
 
-  const loadVenues = async () => {
-    setLoadingVenues(true);
-    const { data, error } = await supabase.from("venues").select("*").order("name");
-    if (!error && data?.length) {
-      setVenues(data.map(v => ({ ...v, todaySales: Math.random() * 500 + 100, status: "online" })));
-    } else {
-      setVenues(MOCK_VENUES);
-    }
-    setLoadingVenues(false);
+  // --- Billing ---
+  const loadBilling = async () => {
+    setLoadingBilling(true);
+    const { data, error } = await supabase.from("venues").select("id, name, subscription_plan, monthly_fee_pence, billing_status").order("name");
+    if (!error) setBilling(data || []);
+    setLoadingBilling(false);
+  };
+
+  const saveBilling = async (id) => {
+    const { error } = await supabase.from("venues").update({ subscription_plan: billingFormData.subscription_plan, monthly_fee_pence: Number(billingFormData.monthly_fee_pence), billing_status: billingFormData.billing_status }).eq("id", id);
+    if (!error) { setEditingBilling(null); loadBilling(); } else alert("Error: " + error.message);
   };
 
   const navItems = [
     { id: "venues",     icon: "🏢", label: "Venues" },
+    { id: "users",      icon: "👥", label: "Users" },
+    { id: "stock",      icon: "📦", label: "Stock" },
+    { id: "purchasing", icon: "🛒", label: "Purchasing" },
     { id: "devices",    icon: "📱", label: "Devices" },
     { id: "financials", icon: "💰", label: "Financials" },
     { id: "billing",    icon: "💳", label: "Billing" },
+    { id: "settings",  icon: "⚙️",  label: "Settings" },
   ];
 
   return (
@@ -3512,17 +3680,43 @@ function AdminView() {
       </div>
 
       <div className="manager-content">
+
+        {/* ===== VENUES ===== */}
         {adminSection === "venues" && (
           <>
-            <div>
-              <div className="section-title">ALL VENUES</div>
-              <div className="section-sub">Network-wide overview · {venues.length} venues</div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div>
+                <div className="section-title">ALL VENUES</div>
+                <div className="section-sub">Network-wide overview · {venues.length} venues</div>
+              </div>
+              <button className="btn-sm btn-accent" onClick={() => { setVenueForm({ mode: "new" }); setVenueFormData({ subscription_plan: "pro", monthly_fee_pence: 14900, jarvid_profit_share_pct: 20 }); }}>+ New Venue</button>
             </div>
+
+            {venueForm && (
+              <div style={{ background: DS.colors.card, border: `1px solid ${DS.colors.border}`, borderRadius: 10, padding: 20 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 16 }}>{venueForm.mode === "new" ? "New Venue" : "Edit Venue"}</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <div style={fieldStyle}><div style={labelStyle}>Name *</div><input style={inputStyle} value={venueFormData.name || ""} onChange={e => setVenueFormData(d => ({ ...d, name: e.target.value }))} placeholder="The Crown Pub" /></div>
+                  <div style={fieldStyle}><div style={labelStyle}>Location</div><input style={inputStyle} value={venueFormData.location || ""} onChange={e => setVenueFormData(d => ({ ...d, location: e.target.value }))} placeholder="Manchester" /></div>
+                  {venueForm.mode === "new" && <div style={fieldStyle}><div style={labelStyle}>Org ID (UUID)</div><input style={inputStyle} value={venueFormData.org_id || ""} onChange={e => setVenueFormData(d => ({ ...d, org_id: e.target.value }))} placeholder="optional" /></div>}
+                  <div style={fieldStyle}><div style={labelStyle}>Profit Share %</div><input style={inputStyle} type="number" value={venueFormData.jarvid_profit_share_pct ?? 20} onChange={e => setVenueFormData(d => ({ ...d, jarvid_profit_share_pct: e.target.value }))} /></div>
+                  <div style={fieldStyle}><div style={labelStyle}>Supplier Email</div><input style={inputStyle} type="email" value={venueFormData.supplier_email || ""} onChange={e => setVenueFormData(d => ({ ...d, supplier_email: e.target.value }))} placeholder="supplier@company.com" /></div>
+                  <div style={fieldStyle}><div style={labelStyle}>Subscription Plan</div><select style={inputStyle} value={venueFormData.subscription_plan || "pro"} onChange={e => setVenueFormData(d => ({ ...d, subscription_plan: e.target.value }))}><option value="free">Free</option><option value="starter">Starter</option><option value="pro">Pro</option></select></div>
+                  <div style={fieldStyle}><div style={labelStyle}>Monthly Fee (pence)</div><input style={inputStyle} type="number" value={venueFormData.monthly_fee_pence ?? 14900} onChange={e => setVenueFormData(d => ({ ...d, monthly_fee_pence: e.target.value }))} /></div>
+                </div>
+                <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+                  <button className="btn-sm btn-accent" onClick={saveVenue} disabled={savingVenue}>{savingVenue ? "Saving…" : "Save"}</button>
+                  <button className="btn-sm btn-outline" onClick={() => setVenueForm(null)}>Cancel</button>
+                </div>
+              </div>
+            )}
+
             <div className="stats-row">
               <div className="stat-card"><div className="stat-label">Total Venues</div><div className="stat-value">{venues.length}</div></div>
-              <div className="stat-card"><div className="stat-label">Network Revenue Today</div><div className="stat-value">£1,814</div><div className="stat-delta delta-up">↑ 22%</div></div>
+              <div className="stat-card"><div className="stat-label">Network Revenue Today</div><div className="stat-value">{fmt(venues.reduce((s, v) => s + (v.todaySales || 0), 0))}</div></div>
               <div className="stat-card"><div className="stat-label">Total Kiosks</div><div className="stat-value">{venues.reduce((s, v) => s + (v.kiosks || 1), 0)}</div></div>
             </div>
+
             {loadingVenues ? (
               <div style={{ display: "flex", justifyContent: "center", padding: 40 }}><div className="spinner" /></div>
             ) : (
@@ -3534,7 +3728,10 @@ function AdminView() {
                         <div className="venue-name">{v.name}</div>
                         <div className="venue-loc">📍 {v.location}</div>
                       </div>
-                      <div className={`online-dot ${v.status === "online" ? "dot-online" : "dot-offline"}`} />
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+                        <div className={`online-dot ${v.status === "online" ? "dot-online" : "dot-offline"}`} />
+                        {v.subscription_plan && <span className="tag-pill" style={{ background: "rgba(47,134,235,0.1)", color: DS.colors.blue, fontSize: 10 }}>{v.subscription_plan.toUpperCase()}</span>}
+                      </div>
                     </div>
                     <div>
                       <div style={{ fontSize: 12, color: DS.colors.textMuted, marginBottom: 4 }}>Today's Revenue</div>
@@ -3547,16 +3744,9 @@ function AdminView() {
                     <div style={{ marginBottom: 10 }}>
                       <div style={{ fontSize: 11, color: DS.colors.textMuted, marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.06em" }}>Kiosk PIN</div>
                       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          maxLength={6}
-                          defaultValue={v.kiosk_pin || "1234"}
-                          key={v.id}
-                          id={`pin-${v.id}`}
+                        <input type="text" inputMode="numeric" maxLength={6} defaultValue={v.kiosk_pin || "1234"} key={v.id} id={`pin-${v.id}`}
                           style={{ background: DS.colors.surface, border: `1px solid ${DS.colors.border}`, borderRadius: 6, padding: "6px 10px", color: DS.colors.accent, fontSize: 16, fontFamily: DS.font.display, fontWeight: 700, width: 90, outline: "none", letterSpacing: "0.15em" }}
-                          onChange={e => e.target.value = e.target.value.replace(/\D/g, "")}
-                        />
+                          onChange={e => e.target.value = e.target.value.replace(/\D/g, "")} />
                         <button className="btn-sm btn-accent" onClick={async () => {
                           const input = document.getElementById(`pin-${v.id}`);
                           const newPin = input?.value;
@@ -3567,72 +3757,308 @@ function AdminView() {
                       </div>
                     </div>
                     <div style={{ display: "flex", gap: 8 }}>
-                      <button className="btn-sm btn-outline" style={{ flex: 1 }}>View</button>
-                      <button className="btn-sm btn-accent" style={{ flex: 1 }}>Manage</button>
+                      <button className="btn-sm btn-outline" style={{ flex: 1 }} onClick={() => { setVenueForm({ mode: "edit", id: v.id }); setVenueFormData({ name: v.name, location: v.location, jarvid_profit_share_pct: v.jarvid_profit_share_pct || 20, supplier_email: v.supplier_email || "", subscription_plan: v.subscription_plan || "pro", monthly_fee_pence: v.monthly_fee_pence || 14900 }); }}>Edit</button>
+                      <button style={{ ...dangerBtnStyle, flex: 1 }} onClick={() => deleteVenue(v.id)} disabled={deletingVenueId === v.id}>{deletingVenueId === v.id ? "…" : "Delete"}</button>
                     </div>
                   </div>
                 ))}
+                {venues.length === 0 && !loadingVenues && <div style={{ color: DS.colors.textMuted, padding: 32 }}>No venues found.</div>}
               </div>
             )}
           </>
         )}
 
-        {adminSection === "devices" && (
-          <DeviceMonitor venues={venues} />
+        {/* ===== USERS ===== */}
+        {adminSection === "users" && (
+          <>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div><div className="section-title">USERS</div><div className="section-sub">All staff accounts across the platform</div></div>
+              <button className="btn-sm btn-accent" onClick={() => { setUserForm({ mode: "new" }); setUserFormData({ role: "staff" }); }}>+ Add User</button>
+            </div>
+
+            {userForm && (
+              <div style={{ background: DS.colors.card, border: `1px solid ${DS.colors.border}`, borderRadius: 10, padding: 20 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>{userForm.mode === "new" ? "Add Staff User" : "Edit User"}</div>
+                {userForm.mode === "new" && <div style={{ fontSize: 12, color: DS.colors.textMuted, marginBottom: 16 }}>Note: The user must already have a Supabase Auth account. This creates their staff_users record only.</div>}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  {userForm.mode === "new" && <div style={fieldStyle}><div style={labelStyle}>Email *</div><input style={inputStyle} type="email" value={userFormData.email || ""} onChange={e => setUserFormData(d => ({ ...d, email: e.target.value }))} placeholder="staff@venue.com" /></div>}
+                  <div style={fieldStyle}><div style={labelStyle}>Role</div><select style={inputStyle} value={userFormData.role || "staff"} onChange={e => setUserFormData(d => ({ ...d, role: e.target.value }))}><option value="staff">Staff</option><option value="manager">Manager</option><option value="org_admin">Org Admin</option><option value="admin">Admin</option></select></div>
+                  <div style={fieldStyle}><div style={labelStyle}>Venue</div><select style={inputStyle} value={userFormData.venue_id || ""} onChange={e => setUserFormData(d => ({ ...d, venue_id: e.target.value }))}><option value="">— None —</option>{venues.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}</select></div>
+                  <div style={fieldStyle}><div style={labelStyle}>Org ID (UUID)</div><input style={inputStyle} value={userFormData.org_id || ""} onChange={e => setUserFormData(d => ({ ...d, org_id: e.target.value }))} placeholder="optional" /></div>
+                </div>
+                <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+                  <button className="btn-sm btn-accent" onClick={saveUser} disabled={savingUser}>{savingUser ? "Saving…" : "Save"}</button>
+                  <button className="btn-sm btn-outline" onClick={() => setUserForm(null)}>Cancel</button>
+                </div>
+              </div>
+            )}
+
+            {loadingUsers ? (
+              <div style={{ display: "flex", justifyContent: "center", padding: 40 }}><div className="spinner" /></div>
+            ) : (
+              <div className="chart-card" style={{ padding: 0, overflow: "hidden" }}>
+                <table className="data-table">
+                  <thead><tr><th>Email</th><th>Role</th><th>Venue</th><th>Status</th><th>Actions</th></tr></thead>
+                  <tbody>
+                    {users.map(u => (
+                      <tr key={u.id}>
+                        <td style={{ fontWeight: 600, fontSize: 13 }}>{u.email}</td>
+                        <td><span className="tag-pill" style={{ background: u.role === "admin" ? DS.colors.dangerGlow : u.role === "manager" ? "rgba(47,134,235,0.1)" : DS.colors.accentGlow, color: u.role === "admin" ? DS.colors.danger : u.role === "manager" ? DS.colors.blue : DS.colors.accent }}>{u.role}</span></td>
+                        <td style={{ color: DS.colors.textSub }}>{u.venues?.name || "—"}</td>
+                        <td><span className="tag-pill" style={{ background: u.is_active ? DS.colors.accentGlow : DS.colors.dangerGlow, color: u.is_active ? DS.colors.accent : DS.colors.danger }}>{u.is_active ? "Active" : "Inactive"}</span></td>
+                        <td>
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <button className="btn-sm btn-outline" onClick={() => { setUserForm({ mode: "edit", id: u.id }); setUserFormData({ role: u.role, venue_id: u.venue_id || "", org_id: u.org_id || "" }); }}>Edit</button>
+                            <button className="btn-sm btn-outline" style={{ color: u.is_active ? DS.colors.warn : DS.colors.accent, borderColor: u.is_active ? DS.colors.warn : DS.colors.accent }} onClick={() => toggleUserActive(u)}>{u.is_active ? "Deactivate" : "Reactivate"}</button>
+                            <button style={dangerBtnStyle} onClick={() => deleteUser(u.id)}>Delete</button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    {users.length === 0 && <tr><td colSpan={5} style={{ textAlign: "center", color: DS.colors.textMuted, padding: 32 }}>No users found</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
         )}
 
+        {/* ===== STOCK ===== */}
+        {adminSection === "stock" && (
+          <>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div><div className="section-title">STOCK</div><div className="section-sub">Inventory levels across all venues</div></div>
+              <select style={{ ...inputStyle, width: "auto", minWidth: 180 }} value={stockVenueId} onChange={e => setStockVenueId(e.target.value)}>
+                <option value="all">All Venues</option>
+                {venues.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+              </select>
+            </div>
+
+            {loadingInventory ? (
+              <div style={{ display: "flex", justifyContent: "center", padding: 40 }}><div className="spinner" /></div>
+            ) : (
+              <div className="chart-card" style={{ padding: 0, overflow: "hidden" }}>
+                <table className="data-table">
+                  <thead><tr><th>Product</th><th>Category</th><th>Venue</th><th>Stock</th><th>Min</th><th>Max</th><th>Status</th><th>Actions</th></tr></thead>
+                  <tbody>
+                    {inventory.map(inv => {
+                      const threshold = inv.products?.low_stock_threshold || LOW_STOCK_THRESHOLDS[inv.products?.category] || LOW_STOCK_THRESHOLDS.default;
+                      const qty = inv.quantity || 0;
+                      const maxQ = inv.max_quantity;
+                      const isOut = qty === 0;
+                      const isLow = qty > 0 && qty <= threshold;
+                      const isOver = maxQ && qty > maxQ;
+                      const statusLabel = isOut ? "Out" : isLow ? "Low" : isOver ? "Over" : "OK";
+                      const statusColor = isOut ? DS.colors.danger : isLow ? DS.colors.warn : isOver ? DS.colors.blue : DS.colors.accent;
+                      const editing = editingStock[inv.id];
+                      return (
+                        <tr key={inv.id}>
+                          <td style={{ fontWeight: 600 }}>{inv.products?.name || "—"}</td>
+                          <td><span className="tag-pill" style={{ background: DS.colors.accentGlow, color: DS.colors.accent, fontSize: 10 }}>{inv.products?.category || "—"}</span></td>
+                          <td style={{ color: DS.colors.textSub, fontSize: 12 }}>{inv.venues?.name || "—"}</td>
+                          <td style={{ fontFamily: DS.font.mono, fontWeight: 700, color: statusColor }}>{qty}</td>
+                          <td>{editing ? <input style={{ ...inputStyle, width: 60, padding: "3px 6px" }} type="number" defaultValue={threshold} onChange={e => setEditingStock(s => ({ ...s, [inv.id]: { ...s[inv.id], min: e.target.value } }))} /> : threshold}</td>
+                          <td>{editing ? <input style={{ ...inputStyle, width: 60, padding: "3px 6px" }} type="number" defaultValue={maxQ || ""} placeholder="—" onChange={e => setEditingStock(s => ({ ...s, [inv.id]: { ...s[inv.id], max: e.target.value } }))} /> : (maxQ || "—")}</td>
+                          <td><span className="tag-pill" style={{ background: statusColor + "22", color: statusColor }}>{statusLabel}</span></td>
+                          <td>
+                            <div style={{ display: "flex", gap: 6 }}>
+                              {editing ? (
+                                <>
+                                  <button className="btn-sm btn-accent" onClick={() => saveStockThresholds(inv)}>Save</button>
+                                  <button className="btn-sm btn-outline" onClick={() => { const s = { ...editingStock }; delete s[inv.id]; setEditingStock(s); }}>Cancel</button>
+                                </>
+                              ) : (
+                                <>
+                                  <button className="btn-sm btn-outline" onClick={() => setEditingStock(s => ({ ...s, [inv.id]: {} }))}>Edit</button>
+                                  <button className="btn-sm btn-outline" style={{ color: DS.colors.warn, borderColor: DS.colors.warn }} onClick={() => flagForReorder(inv)}>Flag</button>
+                                </>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {inventory.length === 0 && <tr><td colSpan={8} style={{ textAlign: "center", color: DS.colors.textMuted, padding: 32 }}>No inventory records found</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ===== PURCHASING ===== */}
+        {adminSection === "purchasing" && (
+          <>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div><div className="section-title">PURCHASING</div><div className="section-sub">Reorder alerts and purchase orders</div></div>
+              <button className="btn-sm btn-accent" onClick={() => { setPOForm(true); setPOFormData({ venue_id: "", supplier_email: "", notes: "", items: [] }); setPOVenueProducts([]); }}>+ New PO</button>
+            </div>
+
+            {loadingPOs ? (
+              <div style={{ display: "flex", justifyContent: "center", padding: 40 }}><div className="spinner" /></div>
+            ) : (
+              <>
+                {reorderAlerts.length > 0 && (
+                  <div className="chart-card" style={{ border: `1px solid ${DS.colors.warn}33` }}>
+                    <div className="chart-title" style={{ color: DS.colors.warn }}>⚠ Reorder Alerts ({reorderAlerts.length})</div>
+                    <table className="data-table">
+                      <thead><tr><th>Venue</th><th>Product</th><th>Stock</th><th>Min</th><th>Suggested Qty</th><th></th></tr></thead>
+                      <tbody>
+                        {reorderAlerts.map(inv => {
+                          const threshold = inv.products?.low_stock_threshold || LOW_STOCK_THRESHOLDS.default;
+                          const suggested = inv.max_quantity ? Math.max(0, inv.max_quantity - (inv.quantity || 0)) : threshold * 3;
+                          return (
+                            <tr key={inv.id}>
+                              <td>{inv.venues?.name || "—"}</td>
+                              <td style={{ fontWeight: 600 }}>{inv.products?.name || "—"}</td>
+                              <td style={{ color: DS.colors.danger, fontWeight: 700 }}>{inv.quantity || 0}</td>
+                              <td>{threshold}</td>
+                              <td style={{ color: DS.colors.accent }}>{suggested}</td>
+                              <td><button className="btn-sm btn-outline" onClick={() => flagForReorder(inv)}>Create PO</button></td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {poForm && (
+                  <div style={{ background: DS.colors.card, border: `1px solid ${DS.colors.border}`, borderRadius: 10, padding: 20 }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 16 }}>New Purchase Order</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+                      <div style={fieldStyle}>
+                        <div style={labelStyle}>Venue *</div>
+                        <select style={inputStyle} value={poFormData.venue_id} onChange={e => {
+                          const v = venues.find(v => v.id === e.target.value);
+                          setPOFormData(d => ({ ...d, venue_id: e.target.value, supplier_email: v?.supplier_email || d.supplier_email }));
+                          loadPOVenueProducts(e.target.value);
+                        }}>
+                          <option value="">— Select venue —</option>
+                          {venues.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                        </select>
+                      </div>
+                      <div style={fieldStyle}><div style={labelStyle}>Supplier Email</div><input style={inputStyle} type="email" value={poFormData.supplier_email || ""} onChange={e => setPOFormData(d => ({ ...d, supplier_email: e.target.value }))} placeholder="supplier@company.com" /></div>
+                      <div style={{ ...fieldStyle, gridColumn: "span 2" }}><div style={labelStyle}>Notes</div><input style={inputStyle} value={poFormData.notes || ""} onChange={e => setPOFormData(d => ({ ...d, notes: e.target.value }))} placeholder="e.g. Urgent restock" /></div>
+                    </div>
+                    <div style={{ marginBottom: 12 }}>
+                      <div style={{ ...labelStyle, marginBottom: 8 }}>Line Items</div>
+                      {poFormData.items.map((it, idx) => (
+                        <div key={idx} style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+                          {poVenueProducts.length > 0 ? (
+                            <select style={{ ...inputStyle, flex: 2 }} value={it.product_id || ""} onChange={e => {
+                              const p = poVenueProducts.find(p => p.id === e.target.value);
+                              const items = [...poFormData.items]; items[idx] = { ...items[idx], product_id: e.target.value, name: p?.name || "" }; setPOFormData(d => ({ ...d, items }));
+                            }}>
+                              <option value="">— Select product —</option>
+                              {poVenueProducts.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                            </select>
+                          ) : (
+                            <input style={{ ...inputStyle, flex: 2 }} value={it.name || ""} onChange={e => { const items = [...poFormData.items]; items[idx] = { ...items[idx], name: e.target.value }; setPOFormData(d => ({ ...d, items })); }} placeholder="Product name" />
+                          )}
+                          <input style={{ ...inputStyle, width: 80, flex: "none" }} type="number" min={1} value={it.qty || ""} onChange={e => { const items = [...poFormData.items]; items[idx] = { ...items[idx], qty: Number(e.target.value) }; setPOFormData(d => ({ ...d, items })); }} placeholder="Qty" />
+                          <button className="btn-sm btn-outline" style={{ color: DS.colors.danger, borderColor: DS.colors.danger, flex: "none" }} onClick={() => setPOFormData(d => ({ ...d, items: d.items.filter((_, i) => i !== idx) }))}>✕</button>
+                        </div>
+                      ))}
+                      <button className="btn-sm btn-outline" onClick={() => setPOFormData(d => ({ ...d, items: [...d.items, { name: "", qty: 1, product_id: null }] }))}>+ Add Item</button>
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button className="btn-sm btn-accent" onClick={() => createPO(false)}>Save as Draft</button>
+                      <button className="btn-sm btn-outline" style={{ color: DS.colors.blue, borderColor: DS.colors.blue }} onClick={() => createPO(true)}>Send via Email</button>
+                      <button className="btn-sm btn-outline" onClick={() => setPOForm(false)}>Cancel</button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="chart-card" style={{ padding: 0, overflow: "hidden" }}>
+                  <div style={{ padding: "14px 16px", borderBottom: `1px solid ${DS.colors.border}` }}>
+                    <div className="chart-title" style={{ marginBottom: 0 }}>Purchase Orders</div>
+                  </div>
+                  <table className="data-table">
+                    <thead><tr><th>Date</th><th>Venue</th><th>Status</th><th>Items</th><th>Supplier</th><th>Actions</th></tr></thead>
+                    <tbody>
+                      {purchaseOrders.map(po => {
+                        const statusColor = po.status === "received" ? DS.colors.accent : po.status === "sent" ? DS.colors.blue : DS.colors.textMuted;
+                        return [
+                          <tr key={po.id}>
+                            <td style={{ fontSize: 12 }}>{new Date(po.created_at).toLocaleDateString("en-GB")}</td>
+                            <td>{po.venues?.name || "—"}</td>
+                            <td><span className="tag-pill" style={{ background: statusColor + "22", color: statusColor }}>{po.status}</span></td>
+                            <td>{po.purchase_order_items?.length || 0} items</td>
+                            <td style={{ fontSize: 12, color: DS.colors.textSub }}>{po.supplier_email || po.venues?.supplier_email || "—"}</td>
+                            <td>
+                              <div style={{ display: "flex", gap: 6 }}>
+                                <button className="btn-sm btn-outline" onClick={() => setExpandedPO(expandedPO === po.id ? null : po.id)}>Details</button>
+                                {po.status === "draft" && (
+                                  <button className="btn-sm btn-outline" style={{ color: DS.colors.blue, borderColor: DS.colors.blue }} onClick={() => {
+                                    const email = po.supplier_email || po.venues?.supplier_email || "";
+                                    const body = (po.purchase_order_items || []).map(it => `- ${it.products?.name || it.product_id}: ${it.quantity_ordered}`).join("\n");
+                                    window.open(`mailto:${email}?subject=${encodeURIComponent("Purchase Order — " + (po.venues?.name || ""))}&body=${encodeURIComponent(body)}`);
+                                    supabase.from("purchase_orders").update({ status: "sent" }).eq("id", po.id).then(() => loadPurchasing());
+                                  }}>Send</button>
+                                )}
+                                {po.status === "sent" && <button className="btn-sm btn-accent" onClick={() => markPOReceived(po)}>Mark Received</button>}
+                              </div>
+                            </td>
+                          </tr>,
+                          expandedPO === po.id && (
+                            <tr key={po.id + "-exp"}>
+                              <td colSpan={6} style={{ background: DS.colors.surface, padding: "10px 16px" }}>
+                                <div style={{ fontSize: 12, color: DS.colors.textMuted, marginBottom: 6 }}>Line items</div>
+                                {(po.purchase_order_items || []).map(it => (
+                                  <div key={it.id} style={{ display: "flex", gap: 16, fontSize: 13, padding: "2px 0" }}>
+                                    <span>{it.products?.name || it.product_id}</span>
+                                    <span style={{ color: DS.colors.accent }}>× {it.quantity_ordered}</span>
+                                  </div>
+                                ))}
+                                {po.notes && <div style={{ marginTop: 8, fontSize: 12, color: DS.colors.textSub }}>Note: {po.notes}</div>}
+                              </td>
+                            </tr>
+                          ),
+                        ];
+                      })}
+                      {purchaseOrders.length === 0 && <tr><td colSpan={6} style={{ textAlign: "center", color: DS.colors.textMuted, padding: 32 }}>No purchase orders yet</td></tr>}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+          </>
+        )}
+
+        {/* ===== DEVICES ===== */}
+        {adminSection === "devices" && <DeviceMonitor venues={venues} />}
+
+        {/* ===== FINANCIALS ===== */}
         {adminSection === "financials" && (
           <>
-            <div>
-              <div className="section-title">JARVID FINANCIALS</div>
-              <div className="section-sub">All-time platform revenue — supply margin + profit share (ex VAT)</div>
+            <div><div className="section-title">JARVID FINANCIALS</div><div className="section-sub">Platform revenue — supply margin + profit share (ex VAT)</div></div>
+
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <button className="btn-sm btn-outline" style={{ color: finAllTime ? DS.colors.accent : DS.colors.textSub, borderColor: finAllTime ? DS.colors.accent : DS.colors.border }} onClick={() => setFinAllTime(true)}>All Time</button>
+              {[7, 30, 90].map(d => (
+                <button key={d} className="btn-sm btn-outline" onClick={() => { const to = new Date(); const from = new Date(); from.setDate(from.getDate() - d); setFinDateFrom(from.toISOString().slice(0, 10)); setFinDateTo(to.toISOString().slice(0, 10)); setFinAllTime(false); }}>Last {d}d</button>
+              ))}
+              <input style={{ ...inputStyle, width: 140 }} type="date" value={finDateFrom} onChange={e => { setFinDateFrom(e.target.value); setFinAllTime(false); }} />
+              <span style={{ color: DS.colors.textMuted }}>to</span>
+              <input style={{ ...inputStyle, width: 140 }} type="date" value={finDateTo} onChange={e => { setFinDateTo(e.target.value); setFinAllTime(false); }} />
+              <button className="btn-sm btn-accent" onClick={loadFinancials}>Apply</button>
             </div>
+
             {loadingFinancials ? (
               <div style={{ display: "flex", justifyContent: "center", padding: 40 }}><div className="spinner" /></div>
             ) : financials && (
               <>
-                {/* Platform totals */}
                 <div className="stats-row">
-                  <div className="stat-card">
-                    <div className="stat-label">Total Platform Revenue</div>
-                    <div className="stat-value">{fmt(penceToGBP(financials.platform.totalRevenue))}</div>
-                    <div className="stat-sub" style={{ fontSize: 11, color: DS.colors.textMuted }}>All venues combined</div>
-                  </div>
-                  <div className="stat-card">
-                    <div className="stat-label">JarvID Supply Margin</div>
-                    <div className="stat-value" style={{ color: DS.colors.blue }}>{fmt(penceToGBP(financials.platform.jarvidMargin))}</div>
-                    <div className="stat-sub" style={{ fontSize: 11, color: DS.colors.textMuted }}>Supply price − cost price</div>
-                  </div>
-                  <div className="stat-card">
-                    <div className="stat-label">JarvID Profit Share</div>
-                    <div className="stat-value" style={{ color: DS.colors.accent }}>{fmt(penceToGBP(financials.platform.jarvidShare))}</div>
-                    <div className="stat-sub" style={{ fontSize: 11, color: DS.colors.textMuted }}>% cut of gross profit</div>
-                  </div>
-                  <div className="stat-card">
-                    <div className="stat-label">JarvID Total Income</div>
-                    <div className="stat-value" style={{ color: DS.colors.accent, fontFamily: DS.font.display }}>{fmt(penceToGBP(financials.platform.jarvidTotal))}</div>
-                    <div className="stat-sub" style={{ fontSize: 11, color: DS.colors.textMuted }}>Margin + profit share</div>
-                  </div>
+                  <div className="stat-card"><div className="stat-label">Total Platform Revenue</div><div className="stat-value">{fmt(penceToGBP(financials.platform.totalRevenue))}</div><div className="stat-sub" style={{ fontSize: 11, color: DS.colors.textMuted }}>All venues combined</div></div>
+                  <div className="stat-card"><div className="stat-label">JarvID Supply Margin</div><div className="stat-value" style={{ color: DS.colors.blue }}>{fmt(penceToGBP(financials.platform.jarvidMargin))}</div><div className="stat-sub" style={{ fontSize: 11, color: DS.colors.textMuted }}>Supply price − cost price</div></div>
+                  <div className="stat-card"><div className="stat-label">JarvID Profit Share</div><div className="stat-value" style={{ color: DS.colors.accent }}>{fmt(penceToGBP(financials.platform.jarvidShare))}</div><div className="stat-sub" style={{ fontSize: 11, color: DS.colors.textMuted }}>% cut of gross profit</div></div>
+                  <div className="stat-card"><div className="stat-label">JarvID Total Income</div><div className="stat-value" style={{ color: DS.colors.accent, fontFamily: DS.font.display }}>{fmt(penceToGBP(financials.platform.jarvidTotal))}</div><div className="stat-sub" style={{ fontSize: 11, color: DS.colors.textMuted }}>Margin + profit share</div></div>
                 </div>
-
-                {/* Per venue breakdown */}
                 <div className="chart-card" style={{ padding: 0, overflow: "hidden" }}>
-                  <div style={{ padding: "14px 16px", borderBottom: `1px solid ${DS.colors.border}` }}>
-                    <div className="chart-title" style={{ marginBottom: 0 }}>Per Venue Breakdown</div>
-                  </div>
+                  <div style={{ padding: "14px 16px", borderBottom: `1px solid ${DS.colors.border}` }}><div className="chart-title" style={{ marginBottom: 0 }}>Per Venue Breakdown</div></div>
                   <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>Venue</th>
-                        <th>Revenue</th>
-                        <th>Gross Profit</th>
-                        <th>Venue Share</th>
-                        <th>JarvID Share</th>
-                        <th>Supply Margin</th>
-                        <th>JarvID Total</th>
-                        <th>Split</th>
-                      </tr>
-                    </thead>
+                    <thead><tr><th>Venue</th><th>Revenue</th><th>Gross Profit</th><th>Venue Share</th><th>JarvID Share</th><th>Supply Margin</th><th>JarvID Total</th><th>Split</th></tr></thead>
                     <tbody>
                       {financials.venues.map(v => (
                         <tr key={v.id}>
@@ -3643,54 +4069,108 @@ function AdminView() {
                           <td style={{ color: DS.colors.accent }}>{fmt(penceToGBP(v.jarvidShare))}</td>
                           <td style={{ color: DS.colors.blue }}>{fmt(penceToGBP(v.jarvidMargin))}</td>
                           <td style={{ color: DS.colors.accent, fontWeight: 700 }}>{fmt(penceToGBP(v.jarvidTotal))}</td>
-                          <td>
-                            <span className="tag-pill" style={{ background: "rgba(0,245,196,0.1)", color: DS.colors.accent, fontSize: 11 }}>
-                              {100 - (v.jarvid_profit_share_pct || 20)}/{v.jarvid_profit_share_pct || 20}
-                            </span>
-                          </td>
+                          <td><span className="tag-pill" style={{ background: "rgba(0,245,196,0.1)", color: DS.colors.accent, fontSize: 11 }}>{100 - (v.jarvid_profit_share_pct || 20)}/{v.jarvid_profit_share_pct || 20}</span></td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
+                <div style={{ fontSize: 12, color: DS.colors.textMuted, padding: "4px 2px" }}>All figures are ex VAT · Supply margin = venue supply price minus JarvID cost price · Profit share = JarvID % of (retail − venue supply price)</div>
+              </>
+            )}
+          </>
+        )}
 
-                {/* Note */}
-                <div style={{ fontSize: 12, color: DS.colors.textMuted, padding: "4px 2px" }}>
-                  All figures are ex VAT · Supply margin = venue supply price minus JarvID cost price · Profit share = JarvID % of (retail − venue supply price)
+        {/* ===== BILLING ===== */}
+        {adminSection === "billing" && (
+          <>
+            <div><div className="section-title">BILLING</div><div className="section-sub">Venue subscriptions and platform fees</div></div>
+            <div style={{ background: DS.colors.warnGlow, border: `1px solid ${DS.colors.warn}44`, borderRadius: 8, padding: "10px 14px", fontSize: 13, color: DS.colors.warn }}>
+              Stripe not yet connected — billing is managed manually. Stripe customer/subscription IDs can be added to the <code>venues</code> table when integration is ready.
+            </div>
+            {loadingBilling ? (
+              <div style={{ display: "flex", justifyContent: "center", padding: 40 }}><div className="spinner" /></div>
+            ) : (
+              <>
+                <div className="stats-row">
+                  <div className="stat-card">
+                    <div className="stat-label">MRR</div>
+                    <div className="stat-value">{fmt(penceToGBP(billing.filter(v => (v.billing_status || "active") === "active").reduce((s, v) => s + (v.monthly_fee_pence || 0), 0)))}</div>
+                    <div className="stat-sub" style={{ fontSize: 11, color: DS.colors.textMuted }}>{billing.filter(v => (v.billing_status || "active") === "active").length} active venues</div>
+                  </div>
+                  <div className="stat-card"><div className="stat-label">Paused</div><div className="stat-value" style={{ color: DS.colors.warn }}>{billing.filter(v => v.billing_status === "paused").length}</div></div>
+                  <div className="stat-card"><div className="stat-label">Cancelled</div><div className="stat-value" style={{ color: DS.colors.danger }}>{billing.filter(v => v.billing_status === "cancelled").length}</div></div>
+                </div>
+                <div className="chart-card" style={{ padding: 0, overflow: "hidden" }}>
+                  <table className="data-table">
+                    <thead><tr><th>Venue</th><th>Plan</th><th>Monthly Fee</th><th>Status</th><th>Actions</th></tr></thead>
+                    <tbody>
+                      {billing.map(v => {
+                        const isEditing = editingBilling === v.id;
+                        const statusColor = (v.billing_status || "active") === "active" ? DS.colors.accent : v.billing_status === "paused" ? DS.colors.warn : DS.colors.danger;
+                        return (
+                          <tr key={v.id}>
+                            <td style={{ fontWeight: 600 }}>{v.name}</td>
+                            <td>{isEditing
+                              ? <select style={{ ...inputStyle, width: 120, padding: "4px 6px" }} value={billingFormData.subscription_plan} onChange={e => setBillingFormData(d => ({ ...d, subscription_plan: e.target.value }))}><option value="free">Free</option><option value="starter">Starter</option><option value="pro">Pro</option></select>
+                              : <span className="tag-pill" style={{ background: "rgba(47,134,235,0.1)", color: DS.colors.blue }}>{v.subscription_plan || "pro"}</span>}
+                            </td>
+                            <td>{isEditing
+                              ? <input style={{ ...inputStyle, width: 100, padding: "4px 6px" }} type="number" value={billingFormData.monthly_fee_pence} onChange={e => setBillingFormData(d => ({ ...d, monthly_fee_pence: e.target.value }))} />
+                              : <span style={{ color: DS.colors.accent }}>{fmt(penceToGBP(v.monthly_fee_pence || 0))}/mo</span>}
+                            </td>
+                            <td>{isEditing
+                              ? <select style={{ ...inputStyle, width: 120, padding: "4px 6px" }} value={billingFormData.billing_status} onChange={e => setBillingFormData(d => ({ ...d, billing_status: e.target.value }))}><option value="active">Active</option><option value="paused">Paused</option><option value="cancelled">Cancelled</option></select>
+                              : <span className="tag-pill" style={{ background: statusColor + "22", color: statusColor }}>{v.billing_status || "active"}</span>}
+                            </td>
+                            <td>
+                              {isEditing
+                                ? <div style={{ display: "flex", gap: 6 }}><button className="btn-sm btn-accent" onClick={() => saveBilling(v.id)}>Save</button><button className="btn-sm btn-outline" onClick={() => setEditingBilling(null)}>Cancel</button></div>
+                                : <button className="btn-sm btn-outline" onClick={() => { setEditingBilling(v.id); setBillingFormData({ subscription_plan: v.subscription_plan || "pro", monthly_fee_pence: v.monthly_fee_pence || 14900, billing_status: v.billing_status || "active" }); }}>Edit</button>}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {billing.length === 0 && <tr><td colSpan={5} style={{ textAlign: "center", color: DS.colors.textMuted, padding: 32 }}>No venues found</td></tr>}
+                    </tbody>
+                  </table>
                 </div>
               </>
             )}
           </>
         )}
 
-        {adminSection === "billing" && (
+        {/* ===== SETTINGS ===== */}
+        {adminSection === "settings" && (
           <>
-            <div>
-              <div className="section-title">BILLING</div>
-              <div className="section-sub">Venue subscriptions and platform fees</div>
-            </div>
-            <div className="stats-row">
-              <div className="stat-card"><div className="stat-label">MRR</div><div className="stat-value">£1,196</div><div className="stat-delta delta-up">↑ 8%</div></div>
-              <div className="stat-card"><div className="stat-label">Platform Commission</div><div className="stat-value">£181</div><div className="stat-delta" style={{ color: DS.colors.textSub }}>10% of sales today</div></div>
-            </div>
+            <div><div className="section-title">PLATFORM SETTINGS</div><div className="section-sub">Default configuration for new venues</div></div>
             <div className="chart-card">
-              <div className="chart-title">Venue Subscriptions</div>
-              <table className="data-table">
-                <thead><tr><th>Venue</th><th>Plan</th><th>Monthly Fee</th><th>Status</th></tr></thead>
-                <tbody>
-                  {venues.map((v, i) => (
-                    <tr key={v.id || i}>
-                      <td>{v.name}</td>
-                      <td><span className="tag-pill" style={{ background: "rgba(47,134,235,0.1)", color: DS.colors.blue }}>Pro</span></td>
-                      <td style={{ color: DS.colors.accent }}>{fmt((v.kiosks || 1) * 149)}/mo</td>
-                      <td><span className="tag-pill" style={{ background: DS.colors.accentGlow, color: DS.colors.accent }}>Active</span></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div className="chart-title">Platform Defaults</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                <div style={{ background: DS.colors.surface, borderRadius: 8, padding: 16 }}>
+                  <div style={labelStyle}>Default Profit Share %</div>
+                  <div style={{ fontSize: 28, fontFamily: DS.font.display, fontWeight: 700, color: DS.colors.accent }}>20%</div>
+                  <div style={{ fontSize: 12, color: DS.colors.textMuted }}>JarvID share of gross profit per order</div>
+                </div>
+                <div style={{ background: DS.colors.surface, borderRadius: 8, padding: 16 }}>
+                  <div style={labelStyle}>Default Subscription Plan</div>
+                  <div style={{ fontSize: 28, fontFamily: DS.font.display, fontWeight: 700, color: DS.colors.blue }}>Pro</div>
+                  <div style={{ fontSize: 12, color: DS.colors.textMuted }}>£149.00/mo per venue</div>
+                </div>
+                <div style={{ background: DS.colors.surface, borderRadius: 8, padding: 16 }}>
+                  <div style={labelStyle}>Low Stock Default Threshold</div>
+                  <div style={{ fontSize: 28, fontFamily: DS.font.display, fontWeight: 700, color: DS.colors.warn }}>5 units</div>
+                  <div style={{ fontSize: 12, color: DS.colors.textMuted }}>Per-product thresholds override this</div>
+                </div>
+                <div style={{ background: DS.colors.surface, borderRadius: 8, padding: 16 }}>
+                  <div style={labelStyle}>Persistence</div>
+                  <div style={{ fontSize: 13, color: DS.colors.textSub, marginTop: 4 }}>Settings stored per-venue in the <code>venues</code> table. Add a <code>platform_settings</code> table when global defaults need to be editable.</div>
+                </div>
+              </div>
             </div>
           </>
         )}
+
       </div>
     </div>
   );
