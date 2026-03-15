@@ -556,64 +556,60 @@ function KioskBrowse({ cart, onAddToCart, onRemoveFromCart, onCheckout, venueId,
       setLoading(true);
       setError(null);
       try {
-        // Load active products
-        let query = supabase
+        const since = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
+
+        // Fetch products and recent completed orders in parallel
+        let prodQuery = supabase
           .from("products")
           .select(`*, inventory(quantity)`)
           .eq("is_active", true)
           .order("name");
-        if (venueId) query = query.eq("venue_id", venueId);
-        const { data, error: err } = await query;
-        if (err) throw err;
-        const prods = data || [];
+        if (venueId) prodQuery = prodQuery.eq("venue_id", venueId);
 
-        // Fetch sales counts per product for this venue (last 90 days)
-        const since = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
+        const ordersQuery = venueId
+          ? supabase.from("orders").select("id").eq("venue_id", venueId).eq("status", "completed").gte("created_at", since)
+          : Promise.resolve({ data: [], error: null });
+
+        const [{ data, error: err }, { data: recentOrders, error: ordersErr }] = await Promise.all([prodQuery, ordersQuery]);
+        if (err) throw err;
+        if (ordersErr) console.error("Failed to fetch recent orders:", ordersErr);
+
+        const prods = data || [];
         const prodIds = prods.map(p => p.id);
+        const orderIds = (recentOrders || []).map(o => o.id);
         let hotIds = new Set();
 
-        if (prodIds.length > 0) {
-          // Get completed orders for venue in last 90 days
-          const { data: recentOrders } = await supabase
-            .from("orders")
-            .select("id")
-            .eq("venue_id", venueId)
-            .eq("status", "completed")
-            .gte("created_at", since);
+        if (prodIds.length > 0 && orderIds.length > 0) {
+          // Fetch items for those orders in chunks, filtered to current products only
+          // Chunk to avoid hitting PostgREST URL length limits on .in()
+          const CHUNK = 100;
+          const chunks = [];
+          for (let i = 0; i < orderIds.length; i += CHUNK) chunks.push(orderIds.slice(i, i + CHUNK));
+          const results = await Promise.all(chunks.map(chunk =>
+            supabase.from("order_items").select("product_id, quantity").in("order_id", chunk).in("product_id", prodIds)
+          ));
+          const allItems = results.flatMap(r => r.data || []);
 
-          const orderIds = (recentOrders || []).map(o => o.id);
+          // Sum quantities per product
+          const salesMap = {};
+          allItems.forEach(item => {
+            salesMap[item.product_id] = (salesMap[item.product_id] || 0) + item.quantity;
+          });
 
-          if (orderIds.length > 0) {
-            // Fetch items for those orders in chunks
-            const CHUNK = 100;
-            const chunks = [];
-            for (let i = 0; i < orderIds.length; i += CHUNK) chunks.push(orderIds.slice(i, i + CHUNK));
-            const results = await Promise.all(chunks.map(chunk =>
-              supabase.from("order_items").select("product_id, quantity").in("order_id", chunk)
-            ));
-            const allItems = results.flatMap(r => r.data || []);
+          // Find top 3 per category
+          const categoryGroups = {};
+          prods.forEach(p => {
+            if (!categoryGroups[p.category]) categoryGroups[p.category] = [];
+            categoryGroups[p.category].push({ id: p.id, sales: salesMap[p.id] || 0 });
+          });
 
-            // Sum quantities per product
-            const salesMap = {};
-            allItems.forEach(item => {
-              salesMap[item.product_id] = (salesMap[item.product_id] || 0) + item.quantity;
-            });
-
-            // Find top 3 per category
-            const categoryGroups = {};
-            prods.forEach(p => {
-              if (!categoryGroups[p.category]) categoryGroups[p.category] = [];
-              categoryGroups[p.category].push({ id: p.id, sales: salesMap[p.id] || 0 });
-            });
-
-            Object.values(categoryGroups).forEach(group => {
-              group
-                .sort((a, b) => b.sales - a.sales)
-                .slice(0, 3)
-                .filter(p => p.sales > 0) // only tag if it has actual sales
-                .forEach(p => hotIds.add(p.id));
-            });
-          }
+          Object.values(categoryGroups).forEach(group => {
+            group
+              .sort((a, b) => b.sales - a.sales)
+              .slice(0, 3)
+              .filter(p => p.sales > 0) // only tag if it has actual sales
+              .forEach(p => hotIds.add(p.id));
+          });
         }
 
         const mapped = prods.map(p => ({
