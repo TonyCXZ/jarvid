@@ -3414,6 +3414,8 @@ function AdminView() {
   const [venueFormData, setVenueFormData] = useState({});
   const [savingVenue, setSavingVenue] = useState(false);
   const [deletingVenueId, setDeletingVenueId] = useState(null);
+  const [venuePSHistory, setVenuePSHistory] = useState({}); // { venueId: [records] }
+  const [showingHistoryId, setShowingHistoryId] = useState(null);
 
   // Users
   const [users, setUsers] = useState([]);
@@ -3475,8 +3477,15 @@ function AdminView() {
   const loadVenues = async () => {
     setLoadingVenues(true);
     const today = new Date(); today.setHours(0, 0, 0, 0);
-    const { data, error } = await supabase.from("venues").select("*").order("name");
+    const [{ data, error }, { data: history }] = await Promise.all([
+      supabase.from("venues").select("*").order("name"),
+      supabase.from("venue_profit_share_history").select("venue_id, jarvid_profit_share_pct, effective_from").order("effective_from", { ascending: false }),
+    ]);
     if (error || !data?.length) { setVenues([]); setLoadingVenues(false); return; }
+    // Group history by venue
+    const historyByVenue = {};
+    (history || []).forEach(h => { if (!historyByVenue[h.venue_id]) historyByVenue[h.venue_id] = []; historyByVenue[h.venue_id].push(h); });
+    setVenuePSHistory(historyByVenue);
     const revenueResults = await Promise.all(
       data.map(v => supabase.from("orders").select("total_pence").eq("venue_id", v.id).eq("status", "completed").gte("created_at", today.toISOString()))
     );
@@ -3491,11 +3500,23 @@ function AdminView() {
   const saveVenue = async () => {
     setSavingVenue(true);
     const d = venueFormData;
-    const payload = { name: d.name, location: d.location, jarvid_profit_share_pct: Number(d.jarvid_profit_share_pct) || 20, supplier_email: d.supplier_email || null, subscription_plan: d.subscription_plan || "pro", monthly_fee_pence: Number(d.monthly_fee_pence) || 14900 };
-    const { error } = venueForm.mode === "new"
-      ? await supabase.from("venues").insert({ ...payload, org_id: d.org_id || null })
-      : await supabase.from("venues").update(payload).eq("id", venueForm.id);
-    if (!error) { setVenueForm(null); loadVenues(); } else alert("Error: " + error.message);
+    const newPct = Number(d.jarvid_profit_share_pct) || 20;
+    const payload = { name: d.name, location: d.location, jarvid_profit_share_pct: newPct, supplier_email: d.supplier_email || null, subscription_plan: d.subscription_plan || "pro", monthly_fee_pence: Number(d.monthly_fee_pence) || 14900 };
+    if (venueForm.mode === "new") {
+      const { data: newVenue, error } = await supabase.from("venues").insert({ ...payload, org_id: d.org_id || null }).select().single();
+      if (!error && newVenue) {
+        await supabase.from("venue_profit_share_history").insert({ venue_id: newVenue.id, jarvid_profit_share_pct: newPct, effective_from: d.profit_share_effective_from || new Date().toISOString().slice(0, 10) });
+        setVenueForm(null); loadVenues();
+      } else alert("Error: " + error?.message);
+    } else {
+      const { error } = await supabase.from("venues").update(payload).eq("id", venueForm.id);
+      if (!error) {
+        if (newPct !== venueForm.originalPct && d.profit_share_effective_from) {
+          await supabase.from("venue_profit_share_history").insert({ venue_id: venueForm.id, jarvid_profit_share_pct: newPct, effective_from: d.profit_share_effective_from });
+        }
+        setVenueForm(null); loadVenues();
+      } else alert("Error: " + error.message);
+    }
     setSavingVenue(false);
   };
 
@@ -3619,20 +3640,44 @@ function AdminView() {
   // --- Financials ---
   const loadFinancials = async () => {
     setLoadingFinancials(true);
-    const { data: venuesData } = await supabase.from("venues").select("id, name, jarvid_profit_share_pct");
+    const [{ data: venuesData }, { data: psHistory }] = await Promise.all([
+      supabase.from("venues").select("id, name, jarvid_profit_share_pct"),
+      supabase.from("venue_profit_share_history").select("venue_id, jarvid_profit_share_pct, effective_from").order("effective_from"),
+    ]);
     let q = supabase.from("order_items").select("quantity, unit_price_pence, products(supply_price_pence, jarvid_cost_pence), orders!inner(venue_id, status, created_at)").eq("orders.status", "completed");
     if (!finAllTime && finDateFrom) { const f = new Date(finDateFrom); f.setHours(0,0,0,0); q = q.gte("orders.created_at", f.toISOString()); }
     if (!finAllTime && finDateTo) { const t = new Date(finDateTo); t.setHours(23,59,59,999); q = q.lte("orders.created_at", t.toISOString()); }
     const { data: items } = await q;
     if (!venuesData || !items) { setLoadingFinancials(false); return; }
+
+    // Returns the profit share % that was in effect for a given venue on a given date
+    const getRateForDate = (venueId, orderDate) => {
+      const dateStr = (orderDate || "").slice(0, 10);
+      const applicable = (psHistory || []).filter(h => h.venue_id === venueId && h.effective_from <= dateStr);
+      if (applicable.length) return applicable[applicable.length - 1].jarvid_profit_share_pct; // already sorted asc
+      return venuesData.find(v => v.id === venueId)?.jarvid_profit_share_pct || 20; // fallback to current
+    };
+
     const byVenue = {};
     items.forEach(item => { const vid = item.orders?.venue_id; if (!vid) return; if (!byVenue[vid]) byVenue[vid] = []; byVenue[vid].push(item); });
     const venueFinancials = venuesData.map(v => {
-      const vItems = byVenue[v.id] || []; const pct = v.jarvid_profit_share_pct || 20;
-      let totalRevenue = 0, totalSupply = 0, totalJarvidCost = 0;
-      vItems.forEach(item => { const qty = item.quantity || 1; totalRevenue += (item.unit_price_pence || 0) * qty; totalSupply += (item.products?.supply_price_pence || 0) * qty; totalJarvidCost += (item.products?.jarvid_cost_pence || 0) * qty; });
-      const grossProfit = totalRevenue - totalSupply; const jarvidShare = Math.round(grossProfit * (pct / 100));
-      return { ...v, totalRevenue, grossProfit, jarvidShare, venueShare: grossProfit - jarvidShare, jarvidMargin: totalSupply - totalJarvidCost, jarvidTotal: jarvidShare + (totalSupply - totalJarvidCost) };
+      const vItems = byVenue[v.id] || [];
+      let totalRevenue = 0, totalSupply = 0, totalJarvidCost = 0, totalJarvidShare = 0, totalVenueShare = 0;
+      vItems.forEach(item => {
+        const qty = item.quantity || 1;
+        const pct = getRateForDate(v.id, item.orders?.created_at);
+        const revenue = (item.unit_price_pence || 0) * qty;
+        const supply = (item.products?.supply_price_pence || 0) * qty;
+        totalRevenue += revenue; totalSupply += supply;
+        totalJarvidCost += (item.products?.jarvid_cost_pence || 0) * qty;
+        const itemGrossProfit = revenue - supply;
+        const itemJarvidShare = Math.round(itemGrossProfit * (pct / 100));
+        totalJarvidShare += itemJarvidShare;
+        totalVenueShare += itemGrossProfit - itemJarvidShare;
+      });
+      const grossProfit = totalRevenue - totalSupply;
+      const jarvidMargin = totalSupply - totalJarvidCost;
+      return { ...v, totalRevenue, grossProfit, jarvidShare: totalJarvidShare, venueShare: totalVenueShare, jarvidMargin, jarvidTotal: totalJarvidShare + jarvidMargin };
     });
     const platform = venueFinancials.reduce((s, v) => ({ totalRevenue: s.totalRevenue + v.totalRevenue, grossProfit: s.grossProfit + v.grossProfit, jarvidShare: s.jarvidShare + v.jarvidShare, venueShare: s.venueShare + v.venueShare, jarvidMargin: s.jarvidMargin + v.jarvidMargin, jarvidTotal: s.jarvidTotal + v.jarvidTotal }), { totalRevenue: 0, grossProfit: 0, jarvidShare: 0, venueShare: 0, jarvidMargin: 0, jarvidTotal: 0 });
     setFinancials({ venues: venueFinancials, platform });
@@ -3699,7 +3744,24 @@ function AdminView() {
                   <div style={fieldStyle}><div style={labelStyle}>Name *</div><input style={inputStyle} value={venueFormData.name || ""} onChange={e => setVenueFormData(d => ({ ...d, name: e.target.value }))} placeholder="The Crown Pub" /></div>
                   <div style={fieldStyle}><div style={labelStyle}>Location</div><input style={inputStyle} value={venueFormData.location || ""} onChange={e => setVenueFormData(d => ({ ...d, location: e.target.value }))} placeholder="Manchester" /></div>
                   {venueForm.mode === "new" && <div style={fieldStyle}><div style={labelStyle}>Org ID (UUID)</div><input style={inputStyle} value={venueFormData.org_id || ""} onChange={e => setVenueFormData(d => ({ ...d, org_id: e.target.value }))} placeholder="optional" /></div>}
-                  <div style={fieldStyle}><div style={labelStyle}>Profit Share %</div><input style={inputStyle} type="number" value={venueFormData.jarvid_profit_share_pct ?? 20} onChange={e => setVenueFormData(d => ({ ...d, jarvid_profit_share_pct: e.target.value }))} /></div>
+                  <div style={fieldStyle}>
+                    <div style={labelStyle}>Profit Share %</div>
+                    <input style={inputStyle} type="number" value={venueFormData.jarvid_profit_share_pct ?? 20} onChange={e => setVenueFormData(d => ({ ...d, jarvid_profit_share_pct: e.target.value }))} />
+                  </div>
+                  {venueForm.mode === "new" && (
+                    <div style={fieldStyle}>
+                      <div style={labelStyle}>Agreement Start Date</div>
+                      <input style={inputStyle} type="date" value={venueFormData.profit_share_effective_from || ""} onChange={e => setVenueFormData(d => ({ ...d, profit_share_effective_from: e.target.value }))} />
+                      <div style={{ fontSize: 11, color: DS.colors.textMuted }}>Date the profit share agreement takes effect</div>
+                    </div>
+                  )}
+                  {venueForm.mode === "edit" && Number(venueFormData.jarvid_profit_share_pct) !== venueForm.originalPct && (
+                    <div style={{ ...fieldStyle, gridColumn: "span 2", background: DS.colors.warnGlow, border: `1px solid ${DS.colors.warn}44`, borderRadius: 8, padding: 12 }}>
+                      <div style={labelStyle}>New Rate Effective From *</div>
+                      <input style={inputStyle} type="date" value={venueFormData.profit_share_effective_from || ""} onChange={e => setVenueFormData(d => ({ ...d, profit_share_effective_from: e.target.value }))} />
+                      <div style={{ fontSize: 11, color: DS.colors.warn }}>Financials before this date will use the previous rate ({venueForm.originalPct}%)</div>
+                    </div>
+                  )}
                   <div style={fieldStyle}><div style={labelStyle}>Supplier Email</div><input style={inputStyle} type="email" value={venueFormData.supplier_email || ""} onChange={e => setVenueFormData(d => ({ ...d, supplier_email: e.target.value }))} placeholder="supplier@company.com" /></div>
                   <div style={fieldStyle}><div style={labelStyle}>Subscription Plan</div><select style={inputStyle} value={venueFormData.subscription_plan || "pro"} onChange={e => setVenueFormData(d => ({ ...d, subscription_plan: e.target.value }))}><option value="free">Free</option><option value="starter">Starter</option><option value="pro">Pro</option></select></div>
                   <div style={fieldStyle}><div style={labelStyle}>Monthly Fee (pence)</div><input style={inputStyle} type="number" value={venueFormData.monthly_fee_pence ?? 14900} onChange={e => setVenueFormData(d => ({ ...d, monthly_fee_pence: e.target.value }))} /></div>
@@ -3757,9 +3819,39 @@ function AdminView() {
                       </div>
                     </div>
                     <div style={{ display: "flex", gap: 8 }}>
-                      <button className="btn-sm btn-outline" style={{ flex: 1 }} onClick={() => { setVenueForm({ mode: "edit", id: v.id }); setVenueFormData({ name: v.name, location: v.location, jarvid_profit_share_pct: v.jarvid_profit_share_pct || 20, supplier_email: v.supplier_email || "", subscription_plan: v.subscription_plan || "pro", monthly_fee_pence: v.monthly_fee_pence || 14900 }); }}>Edit</button>
+                      <button className="btn-sm btn-outline" style={{ flex: 1 }} onClick={() => { setVenueForm({ mode: "edit", id: v.id, originalPct: v.jarvid_profit_share_pct || 20 }); setVenueFormData({ name: v.name, location: v.location, jarvid_profit_share_pct: v.jarvid_profit_share_pct || 20, supplier_email: v.supplier_email || "", subscription_plan: v.subscription_plan || "pro", monthly_fee_pence: v.monthly_fee_pence || 14900 }); }}>Edit</button>
+                      <button className="btn-sm btn-outline" style={{ flex: 1 }} onClick={() => setShowingHistoryId(showingHistoryId === v.id ? null : v.id)}>History</button>
                       <button style={{ ...dangerBtnStyle, flex: 1 }} onClick={() => deleteVenue(v.id)} disabled={deletingVenueId === v.id}>{deletingVenueId === v.id ? "…" : "Delete"}</button>
                     </div>
+                    {showingHistoryId === v.id && (
+                      <div style={{ marginTop: 12, borderTop: `1px solid ${DS.colors.border}`, paddingTop: 10 }}>
+                        <div style={{ fontSize: 11, color: DS.colors.textMuted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Profit Share History</div>
+                        {(venuePSHistory[v.id] || []).length === 0 ? (
+                          <div style={{ fontSize: 12, color: DS.colors.textMuted }}>No history recorded yet</div>
+                        ) : (
+                          (venuePSHistory[v.id] || []).map((h, idx, arr) => {
+                            const nextRecord = arr[idx + 1]; // arr is desc, so next = earlier record
+                            const endDate = nextRecord
+                              ? new Date(new Date(h.effective_from) - 1).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })
+                              : null;
+                            const isCurrent = idx === 0;
+                            return (
+                              <div key={h.id || idx} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5px 0", borderBottom: idx < arr.length - 1 ? `1px solid ${DS.colors.border}` : "none" }}>
+                                <div>
+                                  <span style={{ fontSize: 15, fontWeight: 700, fontFamily: DS.font.display, color: isCurrent ? DS.colors.accent : DS.colors.text }}>{h.jarvid_profit_share_pct}%</span>
+                                  {isCurrent && <span className="tag-pill" style={{ background: DS.colors.accentGlow, color: DS.colors.accent, fontSize: 10, marginLeft: 6 }}>current</span>}
+                                </div>
+                                <div style={{ fontSize: 11, color: DS.colors.textMuted, textAlign: "right" }}>
+                                  <div>from {new Date(h.effective_from).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</div>
+                                  {endDate && <div>to {endDate}</div>}
+                                  {isCurrent && !endDate && <div style={{ color: DS.colors.accent }}>ongoing</div>}
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
                 {venues.length === 0 && !loadingVenues && <div style={{ color: DS.colors.textMuted, padding: 32 }}>No venues found.</div>}
