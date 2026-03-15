@@ -3401,6 +3401,95 @@ function DeviceMonitor({ venues }) {
   );
 }
 
+function POProductCombobox({ products = [], value, onChange, inputStyle }) {
+  const [inputVal, setInputVal] = useState("");
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef(null);
+
+  // Sync display text when value is set externally (e.g. reorder alert pre-fill)
+  useEffect(() => {
+    if (!value) { setInputVal(""); return; }
+    const match = products.find(p => p.id === value);
+    if (match) setInputVal(match.name);
+  }, [value, products]);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handler = e => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        const confirmed = products.find(p => p.id === value);
+        setInputVal(confirmed ? confirmed.name : "");
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [value, products]);
+
+  const filtered = inputVal
+    ? products.filter(p => p.name.toLowerCase().includes(inputVal.toLowerCase()))
+    : products;
+
+  const handleChange = e => {
+    const val = e.target.value;
+    setInputVal(val);
+    setOpen(true);
+    if (!val) onChange("", "");
+  };
+
+  const handleSelect = product => {
+    setInputVal(product.name);
+    onChange(product.id, product.name);
+    setOpen(false);
+  };
+
+  return (
+    <div ref={containerRef} style={{ position: "relative", flex: 2 }}>
+      <input
+        style={{ ...inputStyle, width: "100%" }}
+        value={inputVal}
+        onChange={handleChange}
+        onFocus={() => setOpen(true)}
+        placeholder="Search product…"
+        autoComplete="off"
+      />
+      {open && filtered.length > 0 && (
+        <div style={{
+          position: "absolute",
+          top: "100%",
+          left: 0,
+          right: 0,
+          zIndex: 200,
+          background: DS.colors.surface,
+          border: `1px solid ${DS.colors.border}`,
+          borderRadius: 6,
+          boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+          maxHeight: 220,
+          overflowY: "auto",
+          marginTop: 2,
+        }}>
+          {filtered.map(p => (
+            <div
+              key={p.id}
+              onMouseDown={() => handleSelect(p)}
+              style={{
+                padding: "8px 12px",
+                fontSize: 13,
+                cursor: "pointer",
+                color: DS.colors.text,
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = DS.colors.accent + "22"}
+              onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+            >
+              {p.name}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ============================================================
 // ADMIN VIEW
 // ============================================================
@@ -4036,15 +4125,18 @@ function AdminView() {
                     <div style={{ marginBottom: 12 }}>
                       <div style={{ ...labelStyle, marginBottom: 8 }}>Line Items</div>
                       {poFormData.items.map((it, idx) => (
-                        <div key={idx} style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+                        <div key={it._key || idx} style={{ display: "flex", gap: 8, marginBottom: 6 }}>
                           {poVenueProducts.length > 0 ? (
-                            <select style={{ ...inputStyle, flex: 2 }} value={it.product_id || ""} onChange={e => {
-                              const p = poVenueProducts.find(p => p.id === e.target.value);
-                              const items = [...poFormData.items]; items[idx] = { ...items[idx], product_id: e.target.value, name: p?.name || "" }; setPOFormData(d => ({ ...d, items }));
-                            }}>
-                              <option value="">— Select product —</option>
-                              {poVenueProducts.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                            </select>
+                            <POProductCombobox
+                              products={poVenueProducts}
+                              value={it.product_id || ""}
+                              onChange={(pid, pname) => {
+                                const items = [...poFormData.items];
+                                items[idx] = { ...items[idx], product_id: pid || null, name: pname };
+                                setPOFormData(d => ({ ...d, items }));
+                              }}
+                              inputStyle={inputStyle}
+                            />
                           ) : (
                             <input style={{ ...inputStyle, flex: 2 }} value={it.name || ""} onChange={e => { const items = [...poFormData.items]; items[idx] = { ...items[idx], name: e.target.value }; setPOFormData(d => ({ ...d, items })); }} placeholder="Product name" />
                           )}
@@ -4052,7 +4144,7 @@ function AdminView() {
                           <button className="btn-sm btn-outline" style={{ color: DS.colors.danger, borderColor: DS.colors.danger, flex: "none" }} onClick={() => setPOFormData(d => ({ ...d, items: d.items.filter((_, i) => i !== idx) }))}>✕</button>
                         </div>
                       ))}
-                      <button className="btn-sm btn-outline" onClick={() => setPOFormData(d => ({ ...d, items: [...d.items, { name: "", qty: 1, product_id: null }] }))}>+ Add Item</button>
+                      <button className="btn-sm btn-outline" onClick={() => setPOFormData(d => ({ ...d, items: [...d.items, { name: "", qty: 1, product_id: null, _key: crypto.randomUUID() }] }))}>+ Add Item</button>
                     </div>
                     <div style={{ display: "flex", gap: 8 }}>
                       <button className="btn-sm btn-accent" onClick={() => createPO(false)}>Save as Draft</button>
