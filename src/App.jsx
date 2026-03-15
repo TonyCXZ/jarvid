@@ -556,25 +556,73 @@ function KioskBrowse({ cart, onAddToCart, onRemoveFromCart, onCheckout, venueId,
       setLoading(true);
       setError(null);
       try {
-        // Always fetch all active products; filter by venue if venueId is provided
+        // Load active products
         let query = supabase
           .from("products")
           .select(`*, inventory(quantity)`)
           .eq("is_active", true)
           .order("name");
-
         if (venueId) query = query.eq("venue_id", venueId);
-
         const { data, error: err } = await query;
         if (err) throw err;
+        const prods = data || [];
 
-        const mapped = (data || []).map(p => ({
+        // Fetch sales counts per product for this venue (last 90 days)
+        const since = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
+        const prodIds = prods.map(p => p.id);
+        let hotIds = new Set();
+
+        if (prodIds.length > 0) {
+          // Get completed orders for venue in last 90 days
+          const { data: recentOrders } = await supabase
+            .from("orders")
+            .select("id")
+            .eq("venue_id", venueId)
+            .eq("status", "completed")
+            .gte("created_at", since);
+
+          const orderIds = (recentOrders || []).map(o => o.id);
+
+          if (orderIds.length > 0) {
+            // Fetch items for those orders in chunks
+            const CHUNK = 100;
+            const chunks = [];
+            for (let i = 0; i < orderIds.length; i += CHUNK) chunks.push(orderIds.slice(i, i + CHUNK));
+            const results = await Promise.all(chunks.map(chunk =>
+              supabase.from("order_items").select("product_id, quantity").in("order_id", chunk)
+            ));
+            const allItems = results.flatMap(r => r.data || []);
+
+            // Sum quantities per product
+            const salesMap = {};
+            allItems.forEach(item => {
+              salesMap[item.product_id] = (salesMap[item.product_id] || 0) + item.quantity;
+            });
+
+            // Find top 3 per category
+            const categoryGroups = {};
+            prods.forEach(p => {
+              if (!categoryGroups[p.category]) categoryGroups[p.category] = [];
+              categoryGroups[p.category].push({ id: p.id, sales: salesMap[p.id] || 0 });
+            });
+
+            Object.values(categoryGroups).forEach(group => {
+              group
+                .sort((a, b) => b.sales - a.sales)
+                .slice(0, 3)
+                .filter(p => p.sales > 0) // only tag if it has actual sales
+                .forEach(p => hotIds.add(p.id));
+            });
+          }
+        }
+
+        const mapped = prods.map(p => ({
           ...p,
           stock: p.inventory?.[0]?.quantity ?? 0,
           price: penceToGBP(p.price_pence),
+          popular: hotIds.has(p.id),
         }));
         setProducts(mapped);
-        // Pass products up to KioskView so payment screen can use them
         if (onProductsLoaded) onProductsLoaded(mapped);
       } catch (e) {
         console.error("Error loading products:", e);
