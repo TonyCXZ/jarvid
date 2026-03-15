@@ -17,16 +17,20 @@ The current UI at lines 4112–4118 uses a plain `<select>` when `poVenueProduct
 
 ### New Component: `POProductCombobox`
 
-A small functional component defined inline in `App.jsx`, placed just before its first use (near the purchasing section). No new files needed.
+A small functional component defined inline in `App.jsx`. To retain access to `inputStyle`, it must be defined as an **inner function inside the same render scope where `inputStyle` is defined** (the purchasing section), not as a top-level component. No new files needed.
 
 **Props:**
 - `products` — the `poVenueProducts` array (`{ id, name }[]`)
 - `value` — current `product_id` for this line item (or `""`)
 - `onChange(productId, productName)` — called when user selects a product
+- `inputStyle` — passed in from the outer scope so the input matches the rest of the form
 
-**Internal state:**
-- `inputVal` (string) — text currently shown in the input; initialised from the matching product name when `value` changes
+**Internal state and refs:**
+- `inputVal` (string) — text currently shown in the input
 - `open` (boolean) — controls dropdown visibility
+- `containerRef` — a `useRef` attached to the outer wrapper `div`; used by the outside-click effect to call `containerRef.current.contains(e.target)`
+
+**`inputVal` sync:** A `useEffect` watches `value`. When `value` changes to a new non-empty product ID (i.e., an external/programmatic selection), sync `inputVal` to the matching product name. Do **not** sync when `value` is empty or unchanged — this avoids overwriting text the user is actively typing.
 
 **Filtering:** Case-insensitive substring match of `inputVal` against `product.name`. Shows all products when `inputVal` is empty and the input is focused.
 
@@ -34,7 +38,9 @@ A small functional component defined inline in `App.jsx`, placed just before its
 
 **Clear:** If the user clears the input text, `onChange("", "")` is called to reset `product_id`.
 
-**Close on outside click:** A `useEffect` adds a `mousedown` listener on `document`; clicking outside the combobox container closes the dropdown.
+**Close on outside click:** A `useEffect` adds a `mousedown` listener on `document`; it checks `containerRef.current.contains(e.target)` and closes the dropdown when the click is outside.
+
+**Keyboard interaction:** Out of scope for this iteration. Arrow-key navigation and Enter/Escape are not implemented. The component is mouse/touch only.
 
 ### Replacement
 
