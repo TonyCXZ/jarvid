@@ -1,33 +1,45 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "./supabase";
+import {
+  LayoutGrid, Droplets, Wind, Zap, RefreshCw,
+  CreditCard, BookOpen, Smartphone, Camera, User,
+  Wifi, Check, Loader2,
+  Sparkles,
+  AlertTriangle, Clock, Lock,
+  CheckCircle2, X, XCircle,
+  LayoutDashboard, TrendingUp, Package, Warehouse, Shield, Users, Download, Settings,
+  FileText,
+  Building2, ShoppingCart, Monitor, PoundSterling,
+  MapPin, Tablet, Circle,
+} from "lucide-react";
 
 // ============================================================
-// DESIGN SYSTEM — Industrial/Neon Dark Theme
+// DESIGN SYSTEM — Warm Noir / Amber Premium
 // ============================================================
 const DS = {
   colors: {
-    bg: "#0a0a0f",
-    surface: "#12121a",
-    card: "#1a1a26",
-    cardHover: "#20202e",
-    border: "#2a2a3e",
-    accent: "#00f5c4",
-    accentDim: "#00c49a",
-    accentGlow: "rgba(0,245,196,0.15)",
-    danger: "#ff4757",
-    dangerGlow: "rgba(255,71,87,0.15)",
-    warn: "#ffa502",
-    warnGlow: "rgba(255,165,2,0.15)",
-    purple: "#7c5cbf",
-    blue: "#2f86eb",
-    text: "#e8e8f0",
-    textSub: "#8888aa",
-    textMuted: "#555570",
+    bg: "#0b0a08",
+    surface: "#131110",
+    card: "#1d1a16",
+    cardHover: "#242018",
+    border: "#312c24",
+    accent: "#f0a830",
+    accentDim: "#c8861a",
+    accentGlow: "rgba(240,168,48,0.14)",
+    danger: "#e5433a",
+    dangerGlow: "rgba(229,67,58,0.15)",
+    warn: "#e07b1a",
+    warnGlow: "rgba(224,123,26,0.15)",
+    purple: "#a855f7",
+    blue: "#3b82f6",
+    text: "#f2ede4",
+    textSub: "#9a9080",
+    textMuted: "#5c5448",
     white: "#ffffff",
   },
   font: {
-    display: "'Barlow Condensed', sans-serif",
-    body: "'DM Sans', sans-serif",
+    display: "'Bebas Neue', sans-serif",
+    body: "'Outfit', sans-serif",
     mono: "'JetBrains Mono', monospace",
   },
 };
@@ -36,11 +48,11 @@ const DS = {
 // CATEGORIES
 // ============================================================
 const CATEGORIES = [
-  { id: "all",            label: "All",              icon: "✦" },
-  { id: "eliquid",        label: "E-Liquids",        icon: "💧" },
-  { id: "prefilled_pod",  label: "Prefilled Pods",   icon: "🫧" },
-  { id: "refillable_kit", label: "Refillable Kits",  icon: "⚡" },
-  { id: "refillable_pods",label: "Replacement Pods", icon: "🔄" },
+  { id: "all",            label: "All",              icon: LayoutGrid },
+  { id: "eliquid",        label: "E-Liquids",        icon: Droplets },
+  { id: "prefilled_pod",  label: "Prefilled Pods",   icon: Wind },
+  { id: "refillable_kit", label: "Refillable Kits",  icon: Zap },
+  { id: "refillable_pods",label: "Replacement Pods", icon: RefreshCw },
 ];
 
 // ============================================================
@@ -91,192 +103,227 @@ const COMPLIANCE_LOG = [
 // ============================================================
 const GlobalStyles = () => (
   <style>{`
-    @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800;900&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body, #root { width: 100%; height: 100%; background: ${DS.colors.bg}; color: ${DS.colors.text}; font-family: ${DS.font.body}; overflow: hidden; }
     ::-webkit-scrollbar { width: 4px; }
     ::-webkit-scrollbar-track { background: ${DS.colors.surface}; }
     ::-webkit-scrollbar-thumb { background: ${DS.colors.border}; border-radius: 2px; }
+
     .app-root { width: 100vw; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
-    .top-nav { display: flex; align-items: center; gap: 0; background: ${DS.colors.surface}; border-bottom: 1px solid ${DS.colors.border}; padding: 0 24px; height: 56px; flex-shrink: 0; }
-    .nav-logo { font-family: ${DS.font.display}; font-weight: 900; font-size: 22px; letter-spacing: 0.05em; color: ${DS.colors.accent}; margin-right: 32px; }
+
+    /* ── Navigation ── */
+    .top-nav { display: flex; align-items: center; gap: 0; background: ${DS.colors.surface}; border-bottom: 1px solid ${DS.colors.border}; box-shadow: 0 1px 0 rgba(240,168,48,0.06); padding: 0 24px; height: 56px; flex-shrink: 0; }
+    .nav-logo { font-family: ${DS.font.display}; font-size: 26px; letter-spacing: 0.06em; color: ${DS.colors.accent}; margin-right: 32px; line-height: 1; }
     .nav-logo span { color: ${DS.colors.textSub}; }
     .nav-tabs { display: flex; gap: 2px; flex: 1; }
-    .nav-tab { padding: 6px 16px; border-radius: 6px; font-size: 13px; font-weight: 500; color: ${DS.colors.textSub}; cursor: pointer; border: none; background: transparent; transition: all 0.15s; letter-spacing: 0.01em; }
+    .nav-tab { padding: 6px 16px; border-radius: 6px; font-size: 13px; font-weight: 500; color: ${DS.colors.textSub}; cursor: pointer; border: none; background: transparent; transition: all 0.15s; letter-spacing: 0.01em; font-family: ${DS.font.body}; }
     .nav-tab:hover { color: ${DS.colors.text}; background: ${DS.colors.card}; }
     .nav-tab.active { color: ${DS.colors.accent}; background: ${DS.colors.accentGlow}; }
     .nav-right { display: flex; align-items: center; gap: 12px; }
     .badge { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; padding: 0 6px; background: ${DS.colors.danger}; color: white; border-radius: 10px; font-size: 11px; font-weight: 700; }
     .main-content { flex: 1; overflow: hidden; display: flex; }
-    .kiosk-shell { width: 100%; height: 100%; display: flex; flex-direction: column; background: linear-gradient(160deg, #0d0d18 0%, #0a0a10 100%); overflow: hidden; }
-    .welcome-screen { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 40px; padding: 40px; text-align: center; background: radial-gradient(ellipse 80% 60% at 50% 40%, rgba(0,245,196,0.06) 0%, transparent 70%); }
-    .welcome-logo { font-family: ${DS.font.display}; font-weight: 900; font-size: 72px; letter-spacing: 0.08em; color: ${DS.colors.white}; line-height: 1; }
-    .welcome-logo .glow { color: ${DS.colors.accent}; text-shadow: 0 0 40px ${DS.colors.accent}; }
-    .welcome-sub { font-size: 20px; color: ${DS.colors.textSub}; font-weight: 300; letter-spacing: 0.06em; text-transform: uppercase; }
-    .welcome-age-notice { padding: 18px 28px; border: 1px solid ${DS.colors.warn}; border-radius: 8px; background: ${DS.colors.warnGlow}; color: ${DS.colors.warn}; font-size: 15px; font-weight: 500; letter-spacing: 0.02em; max-width: 520px; text-align: center; line-height: 1.7; }
-    .btn-primary { padding: 20px 64px; border-radius: 12px; font-family: ${DS.font.display}; font-size: 28px; font-weight: 700; letter-spacing: 0.08em; background: ${DS.colors.accent}; color: ${DS.colors.bg}; border: none; cursor: pointer; box-shadow: 0 0 40px rgba(0,245,196,0.4); transition: all 0.2s; text-transform: uppercase; }
-    .btn-primary:hover { transform: scale(1.02); box-shadow: 0 0 60px rgba(0,245,196,0.6); }
-    .btn-primary:active { transform: scale(0.99); }
+
+    /* ── Kiosk shell ── */
+    .kiosk-shell { width: 100%; height: 100%; display: flex; flex-direction: column; background: linear-gradient(160deg, #100e0b 0%, #0b0a08 100%); overflow: hidden; }
+
+    /* ── Welcome screen ── */
+    .welcome-screen { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 44px; padding: 40px; text-align: center; background: radial-gradient(ellipse 70% 50% at 50% 35%, rgba(240,168,48,0.09) 0%, transparent 65%), radial-gradient(ellipse 40% 30% at 20% 80%, rgba(168,85,247,0.04) 0%, transparent 60%); }
+    .welcome-logo { font-family: ${DS.font.display}; font-size: 80px; letter-spacing: 0.06em; color: ${DS.colors.white}; line-height: 1; }
+    .welcome-logo .glow { color: ${DS.colors.accent}; text-shadow: 0 0 50px rgba(240,168,48,0.5), 0 0 100px rgba(240,168,48,0.2); }
+    .welcome-sub { font-size: 18px; color: ${DS.colors.textSub}; font-weight: 300; letter-spacing: 0.1em; text-transform: uppercase; }
+    .welcome-age-notice { padding: 20px 32px; border: 1px solid ${DS.colors.warn}; border-radius: 12px; background: ${DS.colors.warnGlow}; color: ${DS.colors.warn}; font-size: 15px; font-weight: 500; letter-spacing: 0.01em; max-width: 520px; text-align: center; line-height: 1.8; }
+    .btn-primary { padding: 22px 72px; border-radius: 14px; font-family: ${DS.font.display}; font-size: 32px; letter-spacing: 0.1em; background: ${DS.colors.accent}; color: ${DS.colors.bg}; border: none; cursor: pointer; box-shadow: 0 4px 48px rgba(240,168,48,0.45), 0 2px 12px rgba(0,0,0,0.4); transition: all 0.2s; text-transform: uppercase; }
+    .btn-primary:hover { transform: scale(1.03); box-shadow: 0 6px 64px rgba(240,168,48,0.65), 0 2px 16px rgba(0,0,0,0.4); }
+    .btn-primary:active { transform: scale(0.98); }
+
+    /* ── Browse layout ── */
     .browse-layout { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
-    .browse-header { padding: 64px 20px 0; display: flex; align-items: center; gap: 16px; flex-shrink: 0; }
-    .browse-title { font-family: ${DS.font.display}; font-size: 28px; font-weight: 800; letter-spacing: 0.05em; color: ${DS.colors.white}; flex: 1; }
-    .cart-btn { display: flex; align-items: center; gap: 10px; padding: 12px 20px; border-radius: 10px; background: ${DS.colors.accentGlow}; border: 1px solid ${DS.colors.accent}; color: ${DS.colors.accent}; font-size: 16px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
-    .cart-btn:hover { background: rgba(0,245,196,0.25); }
-    .cat-bar { display: flex; gap: 8px; padding: 12px 20px; overflow-x: auto; flex-shrink: 0; }
-    .cat-btn { display: flex; align-items: center; gap: 6px; padding: 10px 18px; border-radius: 8px; font-size: 14px; font-weight: 500; border: 1px solid ${DS.colors.border}; background: ${DS.colors.card}; color: ${DS.colors.textSub}; cursor: pointer; white-space: nowrap; transition: all 0.15s; }
+    .browse-header { padding: 64px 24px 0; display: flex; align-items: center; gap: 16px; flex-shrink: 0; }
+    .browse-title { font-family: ${DS.font.display}; font-size: 30px; letter-spacing: 0.06em; color: ${DS.colors.white}; flex: 1; }
+    .cart-btn { display: flex; align-items: center; gap: 10px; padding: 13px 22px; border-radius: 12px; background: ${DS.colors.accentGlow}; border: 1px solid ${DS.colors.accent}; color: ${DS.colors.accent}; font-size: 16px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+    .cart-btn:hover { background: rgba(240,168,48,0.22); }
+    .cat-bar { display: flex; gap: 8px; padding: 14px 24px; overflow-x: auto; flex-shrink: 0; }
+    .cat-btn { display: flex; align-items: center; gap: 7px; padding: 11px 20px; border-radius: 10px; font-size: 14px; font-weight: 500; border: 1px solid ${DS.colors.border}; background: ${DS.colors.card}; color: ${DS.colors.textSub}; cursor: pointer; white-space: nowrap; transition: all 0.15s; }
     .cat-btn:hover { border-color: ${DS.colors.accent}; color: ${DS.colors.text}; }
-    .cat-btn.active { border-color: ${DS.colors.accent}; background: ${DS.colors.accentGlow}; color: ${DS.colors.accent}; }
-    .product-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); grid-auto-rows: max-content; align-items: start; gap: 14px; padding: 14px 20px 28px; }
-    .product-card { background: ${DS.colors.card}; border: 1px solid ${DS.colors.border}; border-radius: 12px; padding: 14px; transition: all 0.15s; display: flex; flex-direction: column; gap: 7px; position: relative; height: auto; }
-    .product-card:hover { border-color: ${DS.colors.accent}; transform: translateY(-2px); background: ${DS.colors.cardHover}; }
-    .product-card.in-cart { border-color: ${DS.colors.accent}; background: rgba(0,245,196,0.05); }
+    .cat-btn.active { border-color: ${DS.colors.accent}; background: ${DS.colors.accentGlow}; color: ${DS.colors.accent}; font-weight: 600; }
+
+    /* ── Product grid ── */
+    .product-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(185px, 1fr)); grid-auto-rows: max-content; align-items: start; gap: 14px; padding: 14px 24px 32px; }
+    .product-card { background: ${DS.colors.card}; border: 1px solid ${DS.colors.border}; border-radius: 14px; padding: 14px; transition: all 0.18s; display: flex; flex-direction: column; gap: 7px; position: relative; height: auto; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+    .product-card:hover { border-color: ${DS.colors.accent}; transform: translateY(-3px); background: ${DS.colors.cardHover}; box-shadow: 0 6px 24px rgba(0,0,0,0.35), 0 0 0 1px rgba(240,168,48,0.1); }
+    .product-card.in-cart { border-color: ${DS.colors.accent}; background: rgba(240,168,48,0.05); }
     .product-card.low-stock { border-color: ${DS.colors.warn}; }
-    .product-card.out-of-stock { opacity: 0.45; border-color: ${DS.colors.border}; pointer-events: none; }
+    .product-card.out-of-stock { opacity: 0.4; border-color: ${DS.colors.border}; pointer-events: none; }
     .product-card.out-of-stock:hover { transform: none; background: ${DS.colors.card}; border-color: ${DS.colors.border}; }
-    .out-of-stock-badge { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.75); color: ${DS.colors.textMuted}; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; padding: 3px 8px; border-radius: 4px; text-transform: uppercase; }
-    .kiosk-nav-btn { display: flex; align-items: center; gap: 6px; background: rgba(10,10,20,0.75); backdrop-filter: blur(8px); border: 1px solid ${DS.colors.border}; border-radius: 10px; color: ${DS.colors.textSub}; font-size: 14px; padding: 10px 18px; cursor: pointer; transition: all 0.15s; font-family: ${DS.font.body}; position: absolute; top: 16px; z-index: 10; }
-    .kiosk-nav-btn:hover { border-color: ${DS.colors.accent}; color: ${DS.colors.accent}; background: rgba(0,245,196,0.08); }
+    .out-of-stock-badge { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.8); color: ${DS.colors.textMuted}; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; padding: 3px 8px; border-radius: 4px; text-transform: uppercase; }
+    .kiosk-nav-btn { display: flex; align-items: center; gap: 6px; background: rgba(11,10,8,0.8); backdrop-filter: blur(8px); border: 1px solid ${DS.colors.border}; border-radius: 10px; color: ${DS.colors.textSub}; font-size: 14px; font-weight: 500; padding: 11px 20px; cursor: pointer; transition: all 0.15s; font-family: ${DS.font.body}; position: absolute; top: 16px; z-index: 10; }
+    .kiosk-nav-btn:hover { border-color: ${DS.colors.accent}; color: ${DS.colors.accent}; background: rgba(240,168,48,0.07); }
     .kiosk-nav-btn.back { left: 16px; }
     .kiosk-nav-btn.home { right: 16px; }
-    .popular-badge { position: absolute; top: 10px; right: 10px; padding: 2px 8px; border-radius: 4px; background: ${DS.colors.accent}; color: ${DS.colors.bg}; font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
-    .product-image { width: 100%; height: 120px; object-fit: contain; border-radius: 8px; background: rgba(255,255,255,0.04); display: block; }
-    .product-image-wrap { width: 100%; height: 120px; border-radius: 8px; background: rgba(255,255,255,0.04); display: flex; align-items: center; justify-content: center; overflow: hidden; }
-    .product-brand { font-size: 11px; color: ${DS.colors.textMuted}; text-transform: uppercase; letter-spacing: 0.05em; }
+    .popular-badge { position: absolute; top: 10px; right: 10px; padding: 3px 9px; border-radius: 5px; background: ${DS.colors.accent}; color: ${DS.colors.bg}; font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
+    .product-image { width: 100%; height: 120px; object-fit: contain; border-radius: 8px; background: rgba(255,255,255,0.03); display: block; }
+    .product-image-wrap { width: 100%; height: 120px; border-radius: 8px; background: rgba(255,255,255,0.03); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    .product-brand { font-size: 11px; color: ${DS.colors.textMuted}; text-transform: uppercase; letter-spacing: 0.07em; }
     .product-name { font-size: 14px; font-weight: 600; color: ${DS.colors.text}; line-height: 1.3; }
     .product-flavour { font-size: 12px; color: ${DS.colors.textSub}; }
-    .product-nic { font-size: 11px; padding: 2px 8px; border-radius: 4px; background: rgba(124,92,191,0.2); color: ${DS.colors.purple}; width: fit-content; font-weight: 500; }
-    .product-price { font-family: ${DS.font.display}; font-size: 22px; font-weight: 700; color: ${DS.colors.accent}; }
+    .product-nic { font-size: 11px; padding: 2px 8px; border-radius: 4px; background: rgba(168,85,247,0.15); color: ${DS.colors.purple}; width: fit-content; font-weight: 500; }
+    .product-price { font-family: ${DS.font.display}; font-size: 24px; color: ${DS.colors.accent}; letter-spacing: 0.02em; }
     .product-stock { font-size: 11px; color: ${DS.colors.textMuted}; }
     .low-stock-tag { color: ${DS.colors.warn}; }
     .product-qty-row { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
-    .product-qty-btn { width: 36px; height: 36px; border-radius: 8px; border: 1.5px solid ${DS.colors.border}; background: ${DS.colors.surface}; color: ${DS.colors.text}; font-size: 20px; font-weight: 300; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.15s; flex-shrink: 0; }
+    .product-qty-btn { width: 38px; height: 38px; border-radius: 9px; border: 1.5px solid ${DS.colors.border}; background: ${DS.colors.surface}; color: ${DS.colors.text}; font-size: 20px; font-weight: 300; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.15s; flex-shrink: 0; }
     .product-qty-btn:hover { border-color: ${DS.colors.accent}; color: ${DS.colors.accent}; background: ${DS.colors.accentGlow}; }
     .product-qty-btn.minus:hover { border-color: ${DS.colors.danger}; color: ${DS.colors.danger}; background: ${DS.colors.dangerGlow}; }
-    .product-qty-num { flex: 1; text-align: center; font-family: ${DS.font.display}; font-size: 20px; font-weight: 800; color: ${DS.colors.accent}; }
-    .product-add-btn { width: 100%; height: 36px; border-radius: 8px; border: 1.5px solid ${DS.colors.border}; background: ${DS.colors.surface}; color: ${DS.colors.textSub}; font-size: 22px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.15s; margin-top: 4px; }
+    .product-qty-num { flex: 1; text-align: center; font-family: ${DS.font.display}; font-size: 22px; color: ${DS.colors.accent}; letter-spacing: 0.02em; }
+    .product-add-btn { width: 100%; height: 40px; border-radius: 9px; border: 1.5px solid ${DS.colors.border}; background: ${DS.colors.surface}; color: ${DS.colors.textSub}; font-size: 22px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.15s; margin-top: 4px; }
     .product-add-btn:hover { border-color: ${DS.colors.accent}; color: ${DS.colors.accent}; background: ${DS.colors.accentGlow}; }
-    .cart-overlay { position: absolute; inset: 0; z-index: 50; background: rgba(0,0,0,0.7); backdrop-filter: blur(4px); display: flex; justify-content: flex-end; }
-    .cart-drawer { width: 360px; height: 100%; background: ${DS.colors.surface}; border-left: 1px solid ${DS.colors.border}; display: flex; flex-direction: column; animation: slideIn 0.2s ease; }
-    @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+
+    /* ── Cart ── */
+    .cart-overlay { position: absolute; inset: 0; z-index: 50; background: rgba(0,0,0,0.72); backdrop-filter: blur(6px); display: flex; justify-content: flex-end; }
+    .cart-drawer { width: 360px; height: 100%; background: ${DS.colors.surface}; border-left: 1px solid ${DS.colors.border}; display: flex; flex-direction: column; animation: slideIn 0.22s cubic-bezier(0.25,0.46,0.45,0.94); box-shadow: -8px 0 32px rgba(0,0,0,0.5); }
+    @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
     .cart-header { padding: 20px; border-bottom: 1px solid ${DS.colors.border}; display: flex; align-items: center; justify-content: space-between; }
-    .cart-title { font-family: ${DS.font.display}; font-size: 24px; font-weight: 800; }
-    .close-btn { width: 36px; height: 36px; border-radius: 8px; background: ${DS.colors.card}; border: 1px solid ${DS.colors.border}; color: ${DS.colors.textSub}; font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+    .cart-title { font-family: ${DS.font.display}; font-size: 26px; letter-spacing: 0.04em; }
+    .close-btn { width: 36px; height: 36px; border-radius: 8px; background: ${DS.colors.card}; border: 1px solid ${DS.colors.border}; color: ${DS.colors.textSub}; font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
+    .close-btn:hover { border-color: ${DS.colors.danger}; color: ${DS.colors.danger}; }
     .cart-items { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
     .cart-item { display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 10px; background: ${DS.colors.card}; border: 1px solid ${DS.colors.border}; }
     .cart-item-info { flex: 1; }
     .cart-item-name { font-size: 14px; font-weight: 600; }
     .cart-item-price { font-size: 13px; color: ${DS.colors.textSub}; }
     .qty-control { display: flex; align-items: center; gap: 8px; }
-    .qty-btn { width: 28px; height: 28px; border-radius: 6px; border: 1px solid ${DS.colors.border}; background: ${DS.colors.surface}; color: ${DS.colors.text}; font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.1s; }
+    .qty-btn { width: 30px; height: 30px; border-radius: 7px; border: 1px solid ${DS.colors.border}; background: ${DS.colors.surface}; color: ${DS.colors.text}; font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.1s; }
     .qty-btn:hover { border-color: ${DS.colors.accent}; color: ${DS.colors.accent}; }
     .qty-num { font-weight: 700; font-size: 15px; min-width: 20px; text-align: center; }
     .cart-footer { padding: 16px; border-top: 1px solid ${DS.colors.border}; display: flex; flex-direction: column; gap: 12px; }
     .cart-total-row { display: flex; justify-content: space-between; align-items: center; }
     .cart-total-label { font-size: 15px; color: ${DS.colors.textSub}; }
-    .cart-total-value { font-family: ${DS.font.display}; font-size: 28px; font-weight: 800; color: ${DS.colors.accent}; }
-    .age-verify-screen { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 32px; padding: 40px; text-align: center; }
-    .age-heading { font-family: ${DS.font.display}; font-size: 48px; font-weight: 900; letter-spacing: 0.06em; color: ${DS.colors.white}; }
-    .age-sub { font-size: 17px; color: ${DS.colors.textSub}; max-width: 400px; }
-    .verify-options { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; }
-    .verify-option { width: 180px; padding: 28px 20px; border-radius: 16px; background: ${DS.colors.card}; border: 2px solid ${DS.colors.border}; cursor: pointer; transition: all 0.2s; display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; }
-    .verify-option:hover { border-color: ${DS.colors.accent}; transform: translateY(-4px); background: ${DS.colors.cardHover}; }
-    .verify-icon { font-size: 48px; }
+    .cart-total-value { font-family: ${DS.font.display}; font-size: 30px; color: ${DS.colors.accent}; letter-spacing: 0.02em; }
+
+    /* ── Age verify ── */
+    .age-verify-screen { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 36px; padding: 40px; text-align: center; }
+    .age-heading { font-family: ${DS.font.display}; font-size: 52px; letter-spacing: 0.06em; color: ${DS.colors.white}; }
+    .age-sub { font-size: 17px; color: ${DS.colors.textSub}; max-width: 400px; line-height: 1.6; }
+    .verify-options { display: flex; gap: 18px; flex-wrap: wrap; justify-content: center; }
+    .verify-option { width: 190px; padding: 32px 20px; border-radius: 18px; background: ${DS.colors.card}; border: 2px solid ${DS.colors.border}; cursor: pointer; transition: all 0.2s; display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; box-shadow: 0 4px 16px rgba(0,0,0,0.25); }
+    .verify-option:hover { border-color: ${DS.colors.accent}; transform: translateY(-5px); background: ${DS.colors.cardHover}; box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(240,168,48,0.1); }
+    .verify-icon { font-size: 52px; }
     .verify-label { font-size: 15px; font-weight: 600; color: ${DS.colors.text}; }
-    .verify-desc { font-size: 12px; color: ${DS.colors.textSub}; }
-    .scanning-animation { width: 240px; height: 240px; border-radius: 20px; border: 2px solid ${DS.colors.accent}; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; background: rgba(0,245,196,0.03); position: relative; overflow: hidden; }
+    .verify-desc { font-size: 12px; color: ${DS.colors.textSub}; line-height: 1.5; }
+
+    /* ── Scanning ── */
+    .scanning-animation { width: 240px; height: 240px; border-radius: 20px; border: 2px solid ${DS.colors.accent}; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; background: rgba(240,168,48,0.03); position: relative; overflow: hidden; box-shadow: 0 0 32px rgba(240,168,48,0.12); }
     .scan-line { position: absolute; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, transparent, ${DS.colors.accent}, transparent); animation: scanMove 2s linear infinite; }
     @keyframes scanMove { 0% { top: 0; } 100% { top: 100%; } }
     .scan-text { font-size: 15px; color: ${DS.colors.accent}; font-weight: 500; z-index: 1; }
+
+    /* ── Payment ── */
     .payment-screen { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px; padding: 40px; }
-    .payment-heading { font-family: ${DS.font.display}; font-size: 48px; font-weight: 900; letter-spacing: 0.06em; }
-    .payment-amount { font-family: ${DS.font.display}; font-size: 80px; font-weight: 900; color: ${DS.colors.accent}; text-shadow: 0 0 40px rgba(0,245,196,0.3); }
-    .payment-terminal { width: 280px; padding: 28px; border-radius: 20px; background: ${DS.colors.card}; border: 2px solid ${DS.colors.border}; display: flex; flex-direction: column; align-items: center; gap: 20px; }
-    .nfc-icon { width: 80px; height: 80px; border: 3px solid ${DS.colors.accent}; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 36px; animation: pulse 2s ease-in-out infinite; }
-    @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(0,245,196,0.4); } 50% { box-shadow: 0 0 0 20px rgba(0,245,196,0); } }
+    .payment-heading { font-family: ${DS.font.display}; font-size: 52px; letter-spacing: 0.06em; }
+    .payment-amount { font-family: ${DS.font.display}; font-size: 88px; color: ${DS.colors.accent}; text-shadow: 0 0 48px rgba(240,168,48,0.35); letter-spacing: 0.02em; }
+    .payment-terminal { width: 290px; padding: 30px; border-radius: 22px; background: ${DS.colors.card}; border: 2px solid ${DS.colors.border}; display: flex; flex-direction: column; align-items: center; gap: 22px; box-shadow: 0 8px 32px rgba(0,0,0,0.35); }
+    .nfc-icon { width: 84px; height: 84px; border: 3px solid ${DS.colors.accent}; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 38px; animation: pulse 2s ease-in-out infinite; }
+    @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(240,168,48,0.5); } 50% { box-shadow: 0 0 0 22px rgba(240,168,48,0); } }
     .pay-methods { display: flex; gap: 10px; }
     .pay-method { padding: 8px 16px; border-radius: 8px; border: 1px solid ${DS.colors.border}; background: ${DS.colors.surface}; font-size: 13px; font-weight: 500; color: ${DS.colors.textSub}; }
+
+    /* ── Confirm ── */
     .confirm-screen { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px; padding: 40px; text-align: center; }
     .confirm-icon { font-size: 80px; animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
-    @keyframes popIn { 0% { transform: scale(0); } 100% { transform: scale(1); } }
-    .confirm-heading { font-family: ${DS.font.display}; font-size: 52px; font-weight: 900; letter-spacing: 0.06em; color: ${DS.colors.accent}; }
+    @keyframes popIn { 0% { transform: scale(0); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+    .confirm-heading { font-family: ${DS.font.display}; font-size: 56px; letter-spacing: 0.06em; color: ${DS.colors.accent}; }
     .order-id { font-family: ${DS.font.mono}; font-size: 24px; color: ${DS.colors.textSub}; letter-spacing: 0.1em; }
     .confirm-items { display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 320px; }
-    .confirm-item { display: flex; justify-content: space-between; padding: 10px 16px; border-radius: 8px; background: ${DS.colors.card}; border: 1px solid ${DS.colors.border}; font-size: 14px; }
+    .confirm-item { display: flex; justify-content: space-between; padding: 11px 16px; border-radius: 10px; background: ${DS.colors.card}; border: 1px solid ${DS.colors.border}; font-size: 14px; }
+
+    /* ── Staff view ── */
     .staff-layout { width: 100%; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
     .staff-header { padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid ${DS.colors.border}; flex-shrink: 0; }
-    .staff-heading { font-family: ${DS.font.display}; font-size: 26px; font-weight: 800; }
+    .staff-heading { font-family: ${DS.font.display}; font-size: 28px; letter-spacing: 0.04em; }
     .staff-meta { font-size: 13px; color: ${DS.colors.textSub}; }
     .orders-grid { flex: 1; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; padding: 20px; }
-    .order-card { background: ${DS.colors.card}; border: 1px solid ${DS.colors.border}; border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 14px; transition: border-color 0.2s; }
+    .order-card { background: ${DS.colors.card}; border: 1px solid ${DS.colors.border}; border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 14px; transition: border-color 0.2s; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
     .order-card.pending { border-left: 4px solid ${DS.colors.warn}; }
-    .order-card.pending.timeout-amber { border-left: 4px solid ${DS.colors.warn}; border-color: ${DS.colors.warn}; background: rgba(230,168,0,0.07); animation: none; }
+    .order-card.pending.timeout-amber { border-left: 4px solid ${DS.colors.warn}; border-color: ${DS.colors.warn}; background: rgba(224,123,26,0.07); animation: none; }
     .order-card.pending.timeout-red { border-left: 4px solid ${DS.colors.danger}; border-color: ${DS.colors.danger}; background: rgba(192,57,43,0.1); animation: pulseRed 2s ease-in-out infinite; }
     .order-card.preparing { border-left: 4px solid ${DS.colors.blue}; }
     .order-card.completed { border-left: 4px solid ${DS.colors.accent}; opacity: 0.6; }
     .order-card.rejected { border-left: 4px solid ${DS.colors.danger}; opacity: 0.5; }
     @keyframes pulseRed { 0%,100% { box-shadow: 0 0 0 0 rgba(192,57,43,0); } 50% { box-shadow: 0 0 0 6px rgba(192,57,43,0.15); } }
     .timeout-badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; font-family: monospace; letter-spacing: 0.5px; }
-    .timeout-badge.amber { background: rgba(230,168,0,0.15); color: ${DS.colors.warn}; border: 1px solid rgba(230,168,0,0.3); }
+    .timeout-badge.amber { background: rgba(224,123,26,0.15); color: ${DS.colors.warn}; border: 1px solid rgba(224,123,26,0.3); }
     .timeout-badge.red { background: rgba(192,57,43,0.2); color: ${DS.colors.danger}; border: 1px solid rgba(192,57,43,0.4); }
     .order-header { display: flex; align-items: center; justify-content: space-between; }
     .order-id-tag { font-family: ${DS.font.mono}; font-size: 14px; font-weight: 600; color: ${DS.colors.accent}; }
     .status-pill { padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
     .status-pending { background: ${DS.colors.warnGlow}; color: ${DS.colors.warn}; border: 1px solid ${DS.colors.warn}; }
-    .status-preparing { background: rgba(47,134,235,0.15); color: ${DS.colors.blue}; border: 1px solid ${DS.colors.blue}; }
+    .status-preparing { background: rgba(59,130,246,0.15); color: ${DS.colors.blue}; border: 1px solid ${DS.colors.blue}; }
     .status-completed { background: ${DS.colors.accentGlow}; color: ${DS.colors.accent}; border: 1px solid ${DS.colors.accent}; }
     .status-rejected { background: ${DS.colors.dangerGlow}; color: ${DS.colors.danger}; border: 1px solid ${DS.colors.danger}; }
     .order-items-list { display: flex; flex-direction: column; gap: 6px; }
     .order-item-row { display: flex; justify-content: space-between; font-size: 13px; color: ${DS.colors.textSub}; }
     .order-item-name { color: ${DS.colors.text}; }
     .order-total-row { display: flex; justify-content: space-between; padding-top: 10px; border-top: 1px solid ${DS.colors.border}; font-weight: 600; }
-    .order-total-amount { color: ${DS.colors.accent}; font-family: ${DS.font.display}; font-size: 18px; }
+    .order-total-amount { color: ${DS.colors.accent}; font-family: ${DS.font.display}; font-size: 20px; letter-spacing: 0.02em; }
     .order-meta { display: flex; gap: 16px; font-size: 12px; color: ${DS.colors.textMuted}; flex-wrap: wrap; }
     .order-actions { display: flex; gap: 8px; }
-    .btn-action { flex: 1; padding: 10px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; border: none; transition: all 0.15s; }
+    .btn-action { flex: 1; padding: 11px; border-radius: 9px; font-size: 13px; font-weight: 600; cursor: pointer; border: none; transition: all 0.15s; font-family: ${DS.font.body}; }
     .btn-approve { background: ${DS.colors.accentGlow}; color: ${DS.colors.accent}; border: 1px solid ${DS.colors.accent}; }
-    .btn-approve:hover { background: rgba(0,245,196,0.3); }
-    .btn-complete { background: ${DS.colors.accent}; color: ${DS.colors.bg}; }
+    .btn-approve:hover { background: rgba(240,168,48,0.25); }
+    .btn-complete { background: ${DS.colors.accent}; color: ${DS.colors.bg}; font-weight: 700; }
     .btn-complete:hover { background: ${DS.colors.accentDim}; }
     .btn-reject { background: ${DS.colors.dangerGlow}; color: ${DS.colors.danger}; border: 1px solid ${DS.colors.danger}; }
-    .btn-reject:hover { background: rgba(255,71,87,0.3); }
+    .btn-reject:hover { background: rgba(229,67,58,0.28); }
+
+    /* ── Sidebar / Manager / Admin ── */
     .manager-layout { width: 100%; height: 100%; display: flex; overflow: hidden; }
-    .sidebar { width: 220px; flex-shrink: 0; background: ${DS.colors.surface}; border-right: 1px solid ${DS.colors.border}; padding: 20px 0; display: flex; flex-direction: column; gap: 4px; }
-    .sidebar-section { padding: 8px 16px 4px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: ${DS.colors.textMuted}; font-weight: 600; }
-    .sidebar-item { display: flex; align-items: center; gap: 10px; padding: 10px 16px; cursor: pointer; font-size: 14px; color: ${DS.colors.textSub}; transition: all 0.1s; border-left: 2px solid transparent; }
-    .sidebar-item:hover { color: ${DS.colors.text}; background: rgba(255,255,255,0.03); }
-    .sidebar-item.active { color: ${DS.colors.accent}; border-left-color: ${DS.colors.accent}; background: ${DS.colors.accentGlow}; }
-    .manager-content { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 24px; }
+    .admin-layout { width: 100%; height: 100%; display: flex; overflow: hidden; }
+    .sidebar { width: 220px; flex-shrink: 0; background: ${DS.colors.surface}; border-right: 1px solid ${DS.colors.border}; padding: 20px 0; display: flex; flex-direction: column; gap: 2px; }
+    .sidebar-section { padding: 12px 16px 4px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em; color: ${DS.colors.textMuted}; font-weight: 600; }
+    .sidebar-item { display: flex; align-items: center; gap: 10px; padding: 10px 16px; cursor: pointer; font-size: 13.5px; color: ${DS.colors.textSub}; transition: all 0.12s; border-left: 2px solid transparent; font-weight: 400; }
+    .sidebar-item:hover { color: ${DS.colors.text}; background: rgba(240,168,48,0.04); }
+    .sidebar-item.active { color: ${DS.colors.accent}; border-left-color: ${DS.colors.accent}; background: ${DS.colors.accentGlow}; font-weight: 500; }
+    .manager-content { flex: 1; overflow-y: auto; padding: 28px; display: flex; flex-direction: column; gap: 24px; }
+
+    /* ── Stat cards / Charts ── */
     .stats-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 16px; }
-    .stat-card { padding: 20px; border-radius: 12px; background: ${DS.colors.card}; border: 1px solid ${DS.colors.border}; display: flex; flex-direction: column; gap: 8px; }
-    .stat-label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: ${DS.colors.textMuted}; font-weight: 600; }
-    .stat-value { font-family: ${DS.font.display}; font-size: 32px; font-weight: 800; color: ${DS.colors.white}; }
+    .stat-card { padding: 20px; border-radius: 14px; background: ${DS.colors.card}; border: 1px solid ${DS.colors.border}; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+    .stat-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: ${DS.colors.textMuted}; font-weight: 600; }
+    .stat-value { font-family: ${DS.font.display}; font-size: 34px; color: ${DS.colors.white}; letter-spacing: 0.02em; }
     .stat-delta { font-size: 13px; }
     .delta-up { color: ${DS.colors.accent}; }
     .delta-down { color: ${DS.colors.danger}; }
-    .chart-card { padding: 20px; border-radius: 12px; background: ${DS.colors.card}; border: 1px solid ${DS.colors.border}; }
-    .chart-title { font-size: 15px; font-weight: 600; margin-bottom: 16px; }
+    .chart-card { padding: 20px; border-radius: 14px; background: ${DS.colors.card}; border: 1px solid ${DS.colors.border}; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+    .chart-title { font-size: 14px; font-weight: 600; margin-bottom: 16px; color: ${DS.colors.text}; letter-spacing: 0.01em; }
     .bar-chart { display: flex; align-items: flex-end; gap: 4px; height: 100px; }
     .bar-col { display: flex; flex-direction: column; align-items: center; flex: 1; gap: 4px; }
-    .bar-fill { width: 100%; border-radius: 3px 3px 0 0; background: ${DS.colors.accent}; transition: height 0.5s; min-height: 4px; opacity: 0.8; }
+    .bar-fill { width: 100%; border-radius: 3px 3px 0 0; background: ${DS.colors.accent}; transition: height 0.5s; min-height: 4px; opacity: 0.85; }
     .bar-label { font-size: 10px; color: ${DS.colors.textMuted}; }
     .bar-val { font-size: 10px; color: ${DS.colors.textSub}; }
+
+    /* ── Data table ── */
     .data-table { width: 100%; border-collapse: collapse; }
-    .data-table th { text-align: left; padding: 10px 14px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: ${DS.colors.textMuted}; font-weight: 600; border-bottom: 1px solid ${DS.colors.border}; }
-    .data-table td { padding: 12px 14px; font-size: 13px; border-bottom: 1px solid rgba(42,42,62,0.5); color: ${DS.colors.textSub}; }
+    .data-table th { text-align: left; padding: 10px 14px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: ${DS.colors.textMuted}; font-weight: 600; border-bottom: 1px solid ${DS.colors.border}; }
+    .data-table td { padding: 12px 14px; font-size: 13px; border-bottom: 1px solid rgba(49,44,36,0.5); color: ${DS.colors.textSub}; }
     .data-table td:first-child { color: ${DS.colors.text}; font-weight: 500; }
-    .data-table tr:hover td { background: rgba(255,255,255,0.02); }
+    .data-table tr:hover td { background: rgba(240,168,48,0.025); }
+
+    /* ── Inputs / Buttons ── */
     .prod-manage { display: flex; flex-direction: column; gap: 16px; }
     .prod-search-row { display: flex; gap: 12px; align-items: center; }
-    .search-input { flex: 1; padding: 10px 14px; border-radius: 8px; background: ${DS.colors.card}; border: 1px solid ${DS.colors.border}; color: ${DS.colors.text}; font-size: 14px; outline: none; font-family: ${DS.font.body}; }
+    .search-input { flex: 1; padding: 10px 14px; border-radius: 9px; background: ${DS.colors.card}; border: 1px solid ${DS.colors.border}; color: ${DS.colors.text}; font-size: 14px; outline: none; font-family: ${DS.font.body}; transition: border-color 0.15s; }
     .search-input:focus { border-color: ${DS.colors.accent}; }
     .search-input::placeholder { color: ${DS.colors.textMuted}; }
-    .btn-sm { padding: 10px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; border: none; cursor: pointer; transition: all 0.15s; }
+    .btn-sm { padding: 9px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; border: none; cursor: pointer; transition: all 0.15s; font-family: ${DS.font.body}; }
     .btn-outline { background: transparent; border: 1px solid ${DS.colors.border}; color: ${DS.colors.textSub}; }
     .btn-outline:hover { border-color: ${DS.colors.accent}; color: ${DS.colors.accent}; }
-    .btn-accent { background: ${DS.colors.accent}; color: ${DS.colors.bg}; }
+    .btn-accent { background: ${DS.colors.accent}; color: ${DS.colors.bg}; font-weight: 700; }
     .btn-accent:hover { background: ${DS.colors.accentDim}; }
+
+    /* ── Compliance log ── */
     .compliance-log { display: flex; flex-direction: column; gap: 8px; }
-    .log-entry { padding: 12px 16px; border-radius: 8px; background: ${DS.colors.card}; border: 1px solid ${DS.colors.border}; display: flex; align-items: center; gap: 16px; font-size: 13px; }
+    .log-entry { padding: 12px 16px; border-radius: 9px; background: ${DS.colors.card}; border: 1px solid ${DS.colors.border}; display: flex; align-items: center; gap: 16px; font-size: 13px; }
     .log-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
     .log-dot-pass { background: ${DS.colors.accent}; }
     .log-dot-fail { background: ${DS.colors.danger}; }
@@ -285,79 +332,97 @@ const GlobalStyles = () => (
     .log-result-pass { color: ${DS.colors.accent}; font-weight: 600; }
     .log-result-fail { color: ${DS.colors.danger}; font-weight: 600; }
     .log-anon { color: ${DS.colors.textMuted}; font-size: 12px; font-family: ${DS.font.mono}; }
-    .admin-layout { width: 100%; height: 100%; display: flex; overflow: hidden; }
+
+    /* ── Venue cards ── */
     .venue-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
-    .venue-card { padding: 20px; border-radius: 14px; background: ${DS.colors.card}; border: 1px solid ${DS.colors.border}; display: flex; flex-direction: column; gap: 14px; cursor: pointer; transition: all 0.15s; }
-    .venue-card:hover { border-color: ${DS.colors.accent}; transform: translateY(-2px); }
+    .venue-card { padding: 20px; border-radius: 16px; background: ${DS.colors.card}; border: 1px solid ${DS.colors.border}; display: flex; flex-direction: column; gap: 14px; cursor: pointer; transition: all 0.18s; box-shadow: 0 2px 10px rgba(0,0,0,0.25); }
+    .venue-card:hover { border-color: ${DS.colors.accent}; transform: translateY(-2px); box-shadow: 0 6px 24px rgba(0,0,0,0.35); }
     .venue-top { display: flex; align-items: center; justify-content: space-between; }
-    .venue-name { font-size: 16px; font-weight: 700; }
-    .venue-loc { font-size: 13px; color: ${DS.colors.textSub}; }
-    .online-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .venue-name { font-size: 16px; font-weight: 600; color: ${DS.colors.text}; }
+    .venue-loc { font-size: 13px; color: ${DS.colors.textSub}; margin-top: 2px; }
+    .online-dot { width: 9px; height: 9px; border-radius: 50%; }
     .dot-online { background: ${DS.colors.accent}; box-shadow: 0 0 8px ${DS.colors.accent}; }
     .dot-offline { background: ${DS.colors.danger}; }
-    .venue-sales { font-family: ${DS.font.display}; font-size: 28px; font-weight: 800; color: ${DS.colors.white}; }
+    .venue-sales { font-family: ${DS.font.display}; font-size: 30px; color: ${DS.colors.white}; letter-spacing: 0.02em; }
     .venue-meta { display: flex; gap: 16px; font-size: 12px; color: ${DS.colors.textMuted}; }
-    .device-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-radius: 8px; background: ${DS.colors.card}; border: 1px solid ${DS.colors.border}; font-size: 13px; }
+
+    /* ── Device rows ── */
+    .device-row { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-radius: 10px; background: ${DS.colors.card}; border: 1px solid ${DS.colors.border}; font-size: 13px; }
     .device-name { font-weight: 500; }
     .device-status { display: flex; align-items: center; gap: 6px; color: ${DS.colors.textSub}; }
     .btn-danger-sm { padding: 6px 14px; border-radius: 6px; background: ${DS.colors.dangerGlow}; border: 1px solid ${DS.colors.danger}; color: ${DS.colors.danger}; font-size: 12px; font-weight: 600; cursor: pointer; }
-    .kiosk-progress { padding: 12px 20px; background: ${DS.colors.surface}; border-top: 1px solid ${DS.colors.border}; display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+
+    /* ── Kiosk progress bar ── */
+    .kiosk-progress { padding: 12px 24px; background: ${DS.colors.surface}; border-top: 1px solid ${DS.colors.border}; display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
     .progress-steps { display: flex; align-items: center; gap: 8px; flex: 1; }
     .prog-step { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; color: ${DS.colors.textMuted}; }
     .prog-step.done { color: ${DS.colors.accent}; }
     .prog-step.active { color: ${DS.colors.white}; }
     .prog-dot { width: 8px; height: 8px; border-radius: 50%; background: ${DS.colors.textMuted}; }
     .prog-dot.done { background: ${DS.colors.accent}; }
-    .prog-dot.active { background: ${DS.colors.white}; box-shadow: 0 0 8px white; }
+    .prog-dot.active { background: ${DS.colors.white}; box-shadow: 0 0 8px rgba(255,255,255,0.6); }
     .prog-line { flex: 1; height: 1px; background: ${DS.colors.border}; max-width: 30px; }
     .prog-line.done { background: ${DS.colors.accent}; }
-    .section-title { font-family: ${DS.font.display}; font-size: 20px; font-weight: 800; letter-spacing: 0.04em; margin-bottom: 4px; }
+
+    /* ── Section headings ── */
+    .section-title { font-family: ${DS.font.display}; font-size: 22px; letter-spacing: 0.06em; margin-bottom: 4px; color: ${DS.colors.white}; }
     .section-sub { font-size: 13px; color: ${DS.colors.textSub}; margin-bottom: 16px; }
+
+    /* ── Stock bars ── */
     .stock-bar-wrap { display: flex; align-items: center; gap: 8px; }
     .stock-bar-bg { flex: 1; height: 4px; border-radius: 2px; background: ${DS.colors.border}; }
     .stock-bar-fill { height: 4px; border-radius: 2px; transition: width 0.3s; }
-    .pin-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.92); z-index: 9999; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(8px); }
-    .pin-box { background: #12121a; border: 1px solid ${DS.colors.border}; border-radius: 16px; padding: 40px; width: 320px; text-align: center; }
-    .pin-title { font-family: ${DS.font.display}; font-size: 22px; font-weight: 900; color: ${DS.colors.text}; margin-bottom: 6px; }
+
+    /* ── PIN overlay ── */
+    .pin-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.93); z-index: 9999; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(10px); }
+    .pin-box { background: ${DS.colors.surface}; border: 1px solid ${DS.colors.border}; border-radius: 20px; padding: 44px; width: 330px; text-align: center; box-shadow: 0 24px 64px rgba(0,0,0,0.7); }
+    .pin-title { font-family: ${DS.font.display}; font-size: 24px; letter-spacing: 0.06em; color: ${DS.colors.text}; margin-bottom: 6px; }
     .pin-sub { font-size: 13px; color: ${DS.colors.textMuted}; margin-bottom: 28px; }
     .pin-dots { display: flex; justify-content: center; gap: 12px; margin-bottom: 24px; }
     .pin-dot { width: 14px; height: 14px; border-radius: 50%; border: 2px solid ${DS.colors.border}; transition: all 0.15s; }
-    .pin-dot.filled { background: ${DS.colors.accent}; border-color: ${DS.colors.accent}; }
+    .pin-dot.filled { background: ${DS.colors.accent}; border-color: ${DS.colors.accent}; box-shadow: 0 0 8px rgba(240,168,48,0.4); }
     .pin-dot.error { background: ${DS.colors.danger}; border-color: ${DS.colors.danger}; }
     .pin-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
-    .pin-key { background: #1a1a28; border: 1px solid ${DS.colors.border}; border-radius: 10px; padding: 16px; font-size: 20px; font-family: ${DS.font.display}; font-weight: 700; color: ${DS.colors.text}; cursor: pointer; transition: all 0.1s; user-select: none; }
-    .pin-key:hover { background: #22223a; border-color: ${DS.colors.accent}; }
-    .pin-key:active { transform: scale(0.93); }
+    .pin-key { background: ${DS.colors.card}; border: 1px solid ${DS.colors.border}; border-radius: 12px; padding: 18px; font-size: 22px; font-family: ${DS.font.display}; letter-spacing: 0.04em; color: ${DS.colors.text}; cursor: pointer; transition: all 0.12s; user-select: none; }
+    .pin-key:hover { background: ${DS.colors.cardHover}; border-color: ${DS.colors.accent}; color: ${DS.colors.accent}; }
+    .pin-key:active { transform: scale(0.92); }
     .pin-key.wide { grid-column: span 2; }
     .pin-error-msg { font-size: 12px; color: ${DS.colors.danger}; min-height: 18px; margin-top: 4px; }
     .logo-tap-hint { font-size: 10px; color: transparent; user-select: none; }
-    .timeout-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.88); z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; backdrop-filter: blur(6px); }
-    .timeout-circle { width: 100px; height: 100px; border-radius: 50%; border: 4px solid ${DS.colors.warn}; display: flex; align-items: center; justify-content: center; font-family: ${DS.font.display}; font-size: 36px; font-weight: 900; color: ${DS.colors.warn}; }
-    .timeout-heading { font-family: ${DS.font.display}; font-size: 26px; font-weight: 900; color: ${DS.colors.white}; }
-    .timeout-sub { font-size: 14px; color: ${DS.colors.textSub}; text-align: center; max-width: 280px; }
-    .tag-pill { display: inline-flex; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; }
-    .auth-screen { width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; background: radial-gradient(ellipse 80% 60% at 50% 40%, rgba(0,245,196,0.06) 0%, transparent 70%); }
-    .auth-card { width: 420px; padding: 48px 40px; background: #12121a; border: 1px solid #2a2a3e; border-radius: 20px; display: flex; flex-direction: column; gap: 28px; }
-    .auth-logo { font-family: 'Barlow Condensed', sans-serif; font-weight: 900; font-size: 48px; letter-spacing: 0.08em; color: white; text-align: center; }
-    .auth-logo span { color: #00f5c4; text-shadow: 0 0 30px #00f5c4; }
-    .auth-subtitle { font-size: 14px; color: #8888aa; text-align: center; margin-top: -20px; letter-spacing: 0.04em; }
-    .auth-form { display: flex; flex-direction: column; gap: 16px; }
-    .auth-label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: #8888aa; font-weight: 600; margin-bottom: 4px; }
-    .auth-input { width: 100%; padding: 14px 16px; border-radius: 10px; background: #1a1a26; border: 1px solid #2a2a3e; color: #e8e8f0; font-size: 15px; outline: none; font-family: 'DM Sans', sans-serif; transition: border-color 0.15s; }
-    .auth-input:focus { border-color: #00f5c4; }
-    .auth-input::placeholder { color: #555570; }
-    .auth-btn { width: 100%; padding: 16px; border-radius: 10px; background: #00f5c4; color: #0a0a0f; font-family: 'Barlow Condensed', sans-serif; font-size: 20px; font-weight: 700; letter-spacing: 0.08em; border: none; cursor: pointer; transition: all 0.2s; text-transform: uppercase; }
-    .auth-btn:hover { background: #00c49a; }
-    .auth-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-    .auth-error { padding: 12px 16px; border-radius: 8px; background: rgba(255,71,87,0.1); border: 1px solid #ff4757; color: #ff4757; font-size: 13px; text-align: center; }
-    .auth-role-badge { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 10px; border-radius: 8px; background: rgba(0,245,196,0.1); border: 1px solid rgba(0,245,196,0.3); font-size: 13px; color: #00f5c4; font-weight: 600; }
-    .logout-btn { padding: 6px 14px; border-radius: 6px; background: transparent; border: 1px solid #2a2a3e; color: #8888aa; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
-    .logout-btn:hover { border-color: #ff4757; color: #ff4757; }
 
+    /* ── Timeout overlay ── */
+    .timeout-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.9); z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; backdrop-filter: blur(8px); }
+    .timeout-circle { width: 100px; height: 100px; border-radius: 50%; border: 4px solid ${DS.colors.warn}; display: flex; align-items: center; justify-content: center; font-family: ${DS.font.display}; font-size: 38px; color: ${DS.colors.warn}; }
+    .timeout-heading { font-family: ${DS.font.display}; font-size: 28px; letter-spacing: 0.04em; color: ${DS.colors.white}; }
+    .timeout-sub { font-size: 14px; color: ${DS.colors.textSub}; text-align: center; max-width: 280px; line-height: 1.6; }
+
+    /* ── Tags / Pills ── */
+    .tag-pill { display: inline-flex; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; }
+
+    /* ── Auth screen ── */
+    .auth-screen { width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; background: radial-gradient(ellipse 70% 50% at 50% 40%, rgba(240,168,48,0.07) 0%, transparent 65%); }
+    .auth-card { width: 420px; padding: 52px 44px; background: ${DS.colors.surface}; border: 1px solid ${DS.colors.border}; border-radius: 22px; display: flex; flex-direction: column; gap: 28px; box-shadow: 0 24px 64px rgba(0,0,0,0.6); }
+    .auth-logo { font-family: 'Bebas Neue', sans-serif; font-size: 52px; letter-spacing: 0.08em; color: white; text-align: center; line-height: 1; }
+    .auth-logo span { color: #f0a830; text-shadow: 0 0 32px rgba(240,168,48,0.5); }
+    .auth-subtitle { font-size: 13px; color: #9a9080; text-align: center; margin-top: -20px; letter-spacing: 0.06em; text-transform: uppercase; }
+    .auth-form { display: flex; flex-direction: column; gap: 16px; }
+    .auth-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #9a9080; font-weight: 600; margin-bottom: 4px; }
+    .auth-input { width: 100%; padding: 14px 16px; border-radius: 10px; background: #1d1a16; border: 1px solid #312c24; color: #f2ede4; font-size: 15px; outline: none; font-family: 'Outfit', sans-serif; transition: border-color 0.15s; }
+    .auth-input:focus { border-color: #f0a830; }
+    .auth-input::placeholder { color: #5c5448; }
+    .auth-btn { width: 100%; padding: 17px; border-radius: 11px; background: #f0a830; color: #0b0a08; font-family: 'Bebas Neue', sans-serif; font-size: 22px; letter-spacing: 0.1em; border: none; cursor: pointer; transition: all 0.2s; text-transform: uppercase; box-shadow: 0 4px 24px rgba(240,168,48,0.35); }
+    .auth-btn:hover { background: #c8861a; box-shadow: 0 4px 32px rgba(240,168,48,0.5); }
+    .auth-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .auth-error { padding: 12px 16px; border-radius: 9px; background: rgba(229,67,58,0.1); border: 1px solid #e5433a; color: #e5433a; font-size: 13px; text-align: center; }
+    .auth-role-badge { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 10px; border-radius: 9px; background: rgba(240,168,48,0.1); border: 1px solid rgba(240,168,48,0.3); font-size: 13px; color: #f0a830; font-weight: 600; }
+    .logout-btn { padding: 6px 14px; border-radius: 6px; background: transparent; border: 1px solid #312c24; color: #9a9080; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s; font-family: 'Outfit', sans-serif; }
+    .logout-btn:hover { border-color: #e5433a; color: #e5433a; }
+
+    /* ── Spinner / banners ── */
     .spinner { width: 40px; height: 40px; border: 3px solid ${DS.colors.border}; border-top-color: ${DS.colors.accent}; border-radius: 50%; animation: spin 0.8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
-    .error-banner { padding: 12px 16px; border-radius: 8px; background: ${DS.colors.dangerGlow}; border: 1px solid ${DS.colors.danger}; color: ${DS.colors.danger}; font-size: 13px; margin-bottom: 16px; }
-    .success-banner { padding: 12px 16px; border-radius: 8px; background: ${DS.colors.accentGlow}; border: 1px solid ${DS.colors.accent}; color: ${DS.colors.accent}; font-size: 13px; margin-bottom: 16px; }
+    .error-banner { padding: 12px 16px; border-radius: 9px; background: ${DS.colors.dangerGlow}; border: 1px solid ${DS.colors.danger}; color: ${DS.colors.danger}; font-size: 13px; margin-bottom: 16px; }
+    .success-banner { padding: 12px 16px; border-radius: 9px; background: ${DS.colors.accentGlow}; border: 1px solid ${DS.colors.accent}; color: ${DS.colors.accent}; font-size: 13px; margin-bottom: 16px; }
   `}</style>
 );
 
@@ -517,7 +582,7 @@ function KioskWelcome({ onStart }) {
         <div className="welcome-logo" style={{ fontSize: 52 }}>VAPE <span className="glow">&</span> NICOTINE KIOSK</div>
       </div>
       <div className="welcome-age-notice">
-        ⚠️ This kiosk sells age-restricted products. You must be 18 or over to proceed.
+        <AlertTriangle size={16} style={{ display: "inline-block", verticalAlign: "middle", marginRight: 6 }} />This kiosk sells age-restricted products. You must be 18 or over to proceed.
         Age verification will be required before your order can be completed.
         Please have a valid form of ID ready — driving licence, passport, or Yoti digital ID.
       </div>
@@ -530,12 +595,12 @@ function KioskWelcome({ onStart }) {
           Providing false information to obtain age-restricted products is a criminal offence.
         </div>
         <button className="btn-primary" onClick={onStart} style={{ width: "100%", fontSize: 18, padding: "20px 0" }}>
-          ✓ &nbsp;I AM 18 OR OVER — TAP TO START
+          <Check size={18} style={{ display: "inline-block", verticalAlign: "middle", marginRight: 8 }} />I AM 18 OR OVER — TAP TO START
         </button>
       </div>
       <div style={{ fontSize: 13, color: DS.colors.textMuted }}>Staff Fulfilled · Age Verified · Fully Compliant</div>
       <div style={{ fontSize: 12, color: DS.colors.textMuted, border: `1px solid ${DS.colors.border}`, borderRadius: 6, padding: "6px 14px", letterSpacing: "0.04em" }}>
-        ℹ️ This is not a vending machine. All orders are fulfilled by a member of staff.
+        This is not a vending machine. All orders are fulfilled by a member of staff.
       </div>
     </div>
   );
@@ -649,7 +714,7 @@ function KioskBrowse({ cart, onAddToCart, onRemoveFromCart, onCheckout, venueId,
         <div className="browse-title">CHOOSE YOUR PRODUCTS</div>
         {totalItems > 0 && (
           <button className="cart-btn" onClick={() => setShowCart(true)}>
-            🛒 {totalItems} item{totalItems !== 1 ? "s" : ""} · {fmt(totalPrice)}
+            <ShoppingCart size={16} style={{ display: "inline-block", verticalAlign: "middle", marginRight: 6 }} />{totalItems} item{totalItems !== 1 ? "s" : ""} · {fmt(totalPrice)}
           </button>
         )}
       </div>
@@ -657,7 +722,7 @@ function KioskBrowse({ cart, onAddToCart, onRemoveFromCart, onCheckout, venueId,
       <div className="cat-bar">
         {CATEGORIES.map(c => (
           <button key={c.id} className={`cat-btn ${cat === c.id ? "active" : ""}`} onClick={() => setCat(c.id)}>
-            {c.icon} {c.label}
+            {c.icon && (() => { const CatIcon = c.icon; return <CatIcon size={14} />; })()} {c.label}
           </button>
         ))}
       </div>
@@ -697,7 +762,7 @@ function KioskBrowse({ cart, onAddToCart, onRemoveFromCart, onCheckout, venueId,
                     {outOfStock
                       ? <span style={{ color: DS.colors.textMuted }}>Unavailable</span>
                       : lowStock
-                        ? <span className="low-stock-tag">⚠ Only {p.stock} left</span>
+                        ? <span className="low-stock-tag" style={{ display: "flex", alignItems: "center", gap: 3 }}><AlertTriangle size={10} /> Only {p.stock} left</span>
                         : <span>{p.stock} in stock</span>
                     }
                   </div>
@@ -722,7 +787,7 @@ function KioskBrowse({ cart, onAddToCart, onRemoveFromCart, onCheckout, venueId,
           <div className="cart-drawer" onClick={e => e.stopPropagation()}>
             <div className="cart-header">
               <div className="cart-title">YOUR BASKET</div>
-              <button className="close-btn" onClick={() => setShowCart(false)}>✕</button>
+              <button className="close-btn" onClick={() => setShowCart(false)}><X size={18} /></button>
             </div>
             <div className="cart-items">
               {Object.entries(cart).map(([id, qty]) => {
@@ -816,7 +881,7 @@ function KioskAgeVerify({ onVerified, onBack, onHome, kioskId }) {
     return (
       <div className="age-verify-screen" style={{ position: "relative" }}>
         {navButtons}
-        <div style={{ fontSize: 80 }}>✅</div>
+        <div style={{ color: DS.colors.accent }}><CheckCircle2 size={80} strokeWidth={1.5} /></div>
         <div className="age-heading" style={{ color: DS.colors.accent }}>AGE VERIFIED</div>
         <div className="age-sub">Your identity has been confirmed via <strong style={{ color: DS.colors.white }}>{method}</strong>. Proceeding to payment.</div>
         <button className="btn-primary" onClick={() => onVerified(verificationId)}>CONTINUE TO PAYMENT →</button>
@@ -847,7 +912,7 @@ function KioskAgeVerify({ onVerified, onBack, onHome, kioskId }) {
         <div className="age-heading">SCANNING {method?.toUpperCase()}</div>
         <div className="scanning-animation">
           <div className="scan-line" />
-          <div style={{ fontSize: 40 }}>{method === "Yoti" ? "📱" : method === "Passport" ? "📘" : "🪪"}</div>
+          <div style={{ color: DS.colors.accent }}>{method === "Yoti" ? <Smartphone size={40} /> : method === "Passport" ? <BookOpen size={40} /> : <CreditCard size={40} />}</div>
           <div className="scan-text">Reading document…</div>
         </div>
         <div className="age-sub">Hold still and follow on-screen instructions</div>
@@ -862,19 +927,19 @@ function KioskAgeVerify({ onVerified, onBack, onHome, kioskId }) {
       <div className="age-sub">You must be 18+ to purchase. Choose a verification method below.</div>
       <div className="verify-options">
         {[
-          { m: "Driving Licence", icon: "🪪", desc: "Scan UK driving licence barcode" },
-          { m: "Passport",        icon: "📘", desc: "Scan passport MRZ" },
-          { m: "Yoti",            icon: "📱", desc: "Show Yoti QR code" },
-          { m: "AI Camera",       icon: "🎥", desc: "Camera facial analysis" },
+          { m: "Driving Licence", icon: CreditCard,  desc: "Scan UK driving licence barcode" },
+          { m: "Passport",        icon: BookOpen,   desc: "Scan passport MRZ" },
+          { m: "Yoti",            icon: Smartphone, desc: "Show Yoti QR code" },
+          { m: "AI Camera",       icon: Camera,     desc: "Camera facial analysis" },
         ].map(v => (
           <div key={v.m} className="verify-option" onClick={() => startScan(v.m)}>
-            <div className="verify-icon">{v.icon}</div>
+            <div className="verify-icon" style={{ color: DS.colors.accent }}><v.icon size={52} strokeWidth={1.5} /></div>
             <div className="verify-label">{v.m}</div>
             <div className="verify-desc">{v.desc}</div>
           </div>
         ))}
         <div className="verify-option" onClick={manualApproval} style={{ borderColor: DS.colors.warn }}>
-          <div className="verify-icon">👤</div>
+          <div className="verify-icon" style={{ color: DS.colors.warn }}><User size={52} strokeWidth={1.5} /></div>
           <div className="verify-label">Staff Override</div>
           <div className="verify-desc">Ask staff to verify</div>
         </div>
@@ -985,19 +1050,19 @@ function KioskPayment({ cart, products, onPaid, onBack, onHome, verificationId, 
         </div>
       )}
       <div className="payment-heading">
-        {phase === "done" ? "✅ PAYMENT SUCCESS" : phase === "processing" ? "PROCESSING…" : "READY TO PAY"}
+        {phase === "done" ? <span style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "center" }}><CheckCircle2 size={20} /> PAYMENT SUCCESS</span> : phase === "processing" ? "PROCESSING…" : "READY TO PAY"}
       </div>
       <div className="payment-amount">{fmt(total)}</div>
       <div className="payment-terminal" onClick={phase === "waiting" ? handleTap : undefined}
         style={{ cursor: phase === "waiting" ? "pointer" : "default" }}>
         <div className="nfc-icon" style={{ borderColor: phase === "done" ? DS.colors.accent : phase === "processing" ? DS.colors.blue : DS.colors.accent }}>
-          {phase === "done" ? "✓" : phase === "processing" ? "⟳" : "📲"}
+          {phase === "done" ? <Check size={36} /> : phase === "processing" ? <Loader2 size={36} style={{ animation: "spin 1s linear infinite" }} /> : <Wifi size={36} />}
         </div>
         <div style={{ fontSize: 14, color: DS.colors.textSub, textAlign: "center" }}>
           {phase === "waiting" ? "Tap card, phone or watch" : phase === "processing" ? "Processing payment…" : "Payment complete!"}
         </div>
         <div className="pay-methods">
-          {["💳 Card", "  Apple Pay", "Google Pay"].map(m => (
+          {["Card", "Apple Pay", "Google Pay"].map(m => (
             <div key={m} className="pay-method">{m}</div>
           ))}
         </div>
@@ -1033,7 +1098,7 @@ function KioskConfirmation({ cart, products, orderId, onReset }) {
 
   return (
     <div className="confirm-screen">
-      <div className="confirm-icon">🎉</div>
+      <div className="confirm-icon" style={{ color: DS.colors.accent }}><Sparkles size={80} strokeWidth={1.5} /></div>
       <div className="confirm-heading">ORDER PLACED!</div>
       <div className="order-id">#{shortId}</div>
       <div className="age-sub">
@@ -1508,7 +1573,7 @@ function LowStockBanner({ venueId }) {
           background: DS.colors.dangerGlow, border: `1px solid ${DS.colors.danger}`,
           borderRadius: 8, padding: "10px 16px", display: "flex", alignItems: "center", gap: 10,
         }}>
-          <span style={{ fontSize: 16 }}>🚨</span>
+          <AlertTriangle size={16} style={{ flexShrink: 0, color: DS.colors.danger }} />
           <div style={{ flex: 1 }}>
             <span style={{ fontWeight: 700, color: DS.colors.danger, fontSize: 13 }}>OUT OF STOCK: </span>
             <span style={{ fontSize: 13, color: DS.colors.text }}>
@@ -1523,7 +1588,7 @@ function LowStockBanner({ venueId }) {
           background: DS.colors.warnGlow, border: `1px solid ${DS.colors.warn}`,
           borderRadius: 8, padding: "10px 16px", display: "flex", alignItems: "center", gap: 10,
         }}>
-          <span style={{ fontSize: 16 }}>⚠️</span>
+          <AlertTriangle size={16} style={{ flexShrink: 0 }} />
           <div style={{ flex: 1 }}>
             <span style={{ fontWeight: 700, color: DS.colors.warn, fontSize: 13 }}>LOW STOCK: </span>
             <span style={{ fontSize: 13, color: DS.colors.text }}>
@@ -1825,7 +1890,7 @@ function StaffView({ user, kioskoidMode, venueIdOverride, kioskPin: kioskPinProp
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <div style={{ fontSize: 13, color: DS.colors.textSub }}>
-            🟢 {pendingCount} pending · {orders.filter(o => o.status === "preparing").length} preparing
+            <Circle size={8} fill={DS.colors.accent} stroke="none" style={{ display: "inline-block", verticalAlign: "middle", marginRight: 4 }} />{pendingCount} pending · {orders.filter(o => o.status === "preparing").length} preparing
           </div>
           {kioskoidMode && (
             <button onClick={() => setStaffLocked(true)} style={{
@@ -1833,7 +1898,7 @@ function StaffView({ user, kioskoidMode, venueIdOverride, kioskPin: kioskPinProp
               background: DS.colors.surface, color: DS.colors.textSub,
               fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
               display: "flex", alignItems: "center", gap: 5,
-            }}>🔒 Lock</button>
+            }}><Lock size={12} /> Lock</button>
           )}
         </div>
       </div>
@@ -1870,10 +1935,10 @@ function StaffView({ user, kioskoidMode, venueIdOverride, kioskPin: kioskPinProp
                 <div className="order-id-tag">#{order.id.slice(0, 8).toUpperCase()}</div>
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   {timeoutClass === "timeout-red" && (
-                    <span className="timeout-badge red">⚠ {ageLabel}</span>
+                    <span className="timeout-badge red" style={{ display: "flex", alignItems: "center", gap: 3 }}><AlertTriangle size={11} /> {ageLabel}</span>
                   )}
                   {timeoutClass === "timeout-amber" && (
-                    <span className="timeout-badge amber">⏱ {ageLabel}</span>
+                    <span className="timeout-badge amber" style={{ display: "flex", alignItems: "center", gap: 3 }}><Clock size={11} /> {ageLabel}</span>
                   )}
                   <div className={`status-pill status-${order.status}`}>{order.status}</div>
                 </div>
@@ -1891,29 +1956,29 @@ function StaffView({ user, kioskoidMode, venueIdOverride, kioskPin: kioskPinProp
                 <span className="order-total-amount">{fmt(penceToGBP(total))}</span>
               </div>
               <div className="order-meta">
-                <span>🕐 {formatTime(order.created_at)}</span>
-                <span>✓ {verifyMethod}</span>
-                <span>💳 {order.payment_method || "card"}</span>
+                <span style={{ display: "flex", alignItems: "center", gap: 3 }}><Clock size={11} /> {formatTime(order.created_at)}</span>
+                <span style={{ display: "flex", alignItems: "center", gap: 3 }}><Check size={11} /> {verifyMethod}</span>
+                <span style={{ display: "flex", alignItems: "center", gap: 3 }}><CreditCard size={11} /> {order.payment_method || "card"}</span>
               </div>
               <div className="order-actions">
                 {order.status === "pending" && (
                   <>
-                    <button className="btn-action btn-approve" onClick={() => handleStaffAction(order.id, "preparing")}>✓ Prepare</button>
+                    <button className="btn-action btn-approve" onClick={() => handleStaffAction(order.id, "preparing")} style={{ display: "flex", alignItems: "center", gap: 5, justifyContent: "center" }}><Check size={13} /> Prepare</button>
                     <button className="btn-action btn-reject" onClick={() => {
                       if (kioskoidMode && staffLocked) { handleStaffAction(order.id, "rejected"); }
                       else { handleRejectClick(order.id); }
-                    }}>✕ Reject</button>
+                    }} style={{ display: "flex", alignItems: "center", gap: 5, justifyContent: "center" }}><X size={13} /> Reject</button>
                   </>
                 )}
                 {order.status === "preparing" && (
-                  <button className="btn-action btn-complete" onClick={() => handleStaffAction(order.id, "completed")}>✅ Mark Fulfilled</button>
+                  <button className="btn-action btn-complete" onClick={() => handleStaffAction(order.id, "completed")} style={{ display: "flex", alignItems: "center", gap: 5, justifyContent: "center" }}><CheckCircle2 size={13} /> Mark Fulfilled</button>
                 )}
                 {order.status === "completed" && (
-                  <div style={{ fontSize: 13, color: DS.colors.accent, textAlign: "center", width: "100%" }}>✅ Fulfilled · Customer collected</div>
+                  <div style={{ fontSize: 13, color: DS.colors.accent, textAlign: "center", width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}><CheckCircle2 size={13} /> Fulfilled · Customer collected</div>
                 )}
                 {order.status === "rejected" && (
-                  <div style={{ fontSize: 13, color: DS.colors.danger, textAlign: "center", width: "100%" }}>
-                    ✕ Order Rejected
+                  <div style={{ fontSize: 13, color: DS.colors.danger, textAlign: "center", width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
+                    <XCircle size={13} /> Order Rejected
                     {order.rejection_reason && (
                       <div style={{ fontSize: 11, color: DS.colors.textMuted, marginTop: 4 }}>
                         Reason: {order.rejection_reason}
@@ -1927,7 +1992,7 @@ function StaffView({ user, kioskoidMode, venueIdOverride, kioskPin: kioskPinProp
         })}
         {!loading && shown.length === 0 && (
           <div style={{ gridColumn: "1/-1", textAlign: "center", padding: 60, color: DS.colors.textMuted }}>
-            <div style={{ fontSize: 40, marginBottom: 16 }}>🎉</div>
+            <div style={{ color: DS.colors.textMuted, marginBottom: 16 }}><CheckCircle2 size={40} strokeWidth={1.5} /></div>
             <div>No orders in this category</div>
           </div>
         )}
@@ -2003,7 +2068,7 @@ function StaffView({ user, kioskoidMode, venueIdOverride, kioskPin: kioskPinProp
             borderRadius: 16, padding: 36, width: 320, textAlign: "center",
             boxShadow: "0 8px 40px rgba(0,0,0,0.6)"
           }}>
-            <div style={{ fontSize: 28, marginBottom: 4 }}>🔒</div>
+            <div style={{ color: DS.colors.textSub, marginBottom: 4 }}><Lock size={28} /></div>
             <div style={{ fontSize: 18, fontWeight: 700, color: DS.colors.white, marginBottom: 4 }}>
               {pendingAction ? "PIN required to update order" : "Staff terminal locked"}
             </div>
@@ -2532,14 +2597,14 @@ function ManagerView({ user }) {
   const maxWeeklySale = Math.max(...weeklySales.map(d => d.sales), 1);
 
   const navItems = [
-    { id: "overview",   icon: "📊", label: "Overview" },
-    { id: "analytics",  icon: "📈", label: "Analytics" },
-    { id: "products",   icon: "📦", label: "Products" },
-    { id: "inventory",  icon: "🏭", label: "Inventory" },
-    { id: "compliance", icon: "🔒", label: "Compliance" },
-    { id: "staff",      icon: "👥", label: "Staff" },
-    { id: "export",     icon: "📥", label: "Export" },
-    { id: "settings",   icon: "⚙️", label: "Settings" },
+    { id: "overview",   icon: LayoutDashboard, label: "Overview" },
+    { id: "analytics",  icon: TrendingUp,      label: "Analytics" },
+    { id: "products",   icon: Package,         label: "Products" },
+    { id: "inventory",  icon: Warehouse,       label: "Inventory" },
+    { id: "compliance", icon: Shield,          label: "Compliance" },
+    { id: "staff",      icon: Users,           label: "Staff" },
+    { id: "export",     icon: Download,        label: "Export" },
+    { id: "settings",   icon: Settings,        label: "Settings" },
   ];
 
   return (
@@ -2560,11 +2625,14 @@ function ManagerView({ user }) {
           )}
         </div>
         <div className="sidebar-section">Navigation</div>
-        {navItems.map(item => (
-          <div key={item.id} className={`sidebar-item ${activeSection === item.id ? "active" : ""}`} onClick={() => setActiveSection(item.id)}>
-            {item.icon} {item.label}
-          </div>
-        ))}
+        {navItems.map(item => {
+          const NavIcon = item.icon;
+          return (
+            <div key={item.id} className={`sidebar-item ${activeSection === item.id ? "active" : ""}`} onClick={() => setActiveSection(item.id)}>
+              {NavIcon && <NavIcon size={15} />} {item.label}
+            </div>
+          );
+        })}
       </div>
 
       <div className="manager-content">
@@ -2625,7 +2693,7 @@ function ManagerView({ user }) {
                     <div className="chart-title" style={{ marginBottom: 2 }}>{selectedDay.fullDate} — Daily Breakdown</div>
                     <div style={{ fontSize: 12, color: DS.colors.textMuted }}>{selectedDay.day}</div>
                   </div>
-                  <button className="btn-sm btn-outline" onClick={() => { setSelectedDay(null); setDayDetail(null); }}>✕ Close</button>
+                  <button className="btn-sm btn-outline" onClick={() => { setSelectedDay(null); setDayDetail(null); }} style={{ display: "flex", alignItems: "center", gap: 4 }}><X size={12} /> Close</button>
                 </div>
                 {loadingDayDetail ? (
                   <div style={{ display: "flex", justifyContent: "center", padding: 40 }}><div className="spinner" /></div>
@@ -2730,7 +2798,7 @@ function ManagerView({ user }) {
               <button className={`btn-sm ${allTimeMode ? "btn-accent" : "btn-outline"}`}
                 onClick={() => setAllTimeMode(m => !m)}
                 style={{ minWidth: 90 }}>
-                📊 All-time
+                <TrendingUp size={13} style={{ display: "inline-block", verticalAlign: "middle", marginRight: 4 }} />All-time
               </button>
             </div>
 
@@ -2893,7 +2961,7 @@ function ManagerView({ user }) {
                     <div className="chart-card" style={{ borderColor: DS.colors.purple }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
                         <div className="chart-title" style={{ marginBottom: 0 }}>{analyticsSelected.label} — Snapshot</div>
-                        <button className="btn-sm btn-outline" onClick={() => setAnalyticsSelected(null)}>✕</button>
+                        <button className="btn-sm btn-outline" onClick={() => setAnalyticsSelected(null)}><X size={12} /></button>
                       </div>
                       <div className="stats-row">
                         <div className="stat-card"><div className="stat-label">Revenue</div><div className="stat-value" style={{ fontSize: 20 }}>{fmt(penceToGBP(analyticsSelected.revenue))}</div></div>
@@ -2984,16 +3052,16 @@ function ManagerView({ user }) {
                         <div className="stat-card">
                           <div className="stat-label">Low Stock</div>
                           <div className="stat-value" style={{ color: DS.colors.warn }}>{lowStockCount}</div>
-                          {lowStockCount > 0 && <div className="stat-delta" style={{ color: DS.colors.warn }}>⚠ Reorder needed</div>}
+                          {lowStockCount > 0 && <div className="stat-delta" style={{ color: DS.colors.warn, display: "flex", alignItems: "center", gap: 3 }}><AlertTriangle size={10} /> Reorder needed</div>}
                         </div>
                         <div className="stat-card">
                           <div className="stat-label">Out of Stock</div>
                           <div className="stat-value" style={{ color: DS.colors.danger }}>{outOfStockCount}</div>
-                          {outOfStockCount > 0 && <div className="stat-delta" style={{ color: DS.colors.danger }}>🚨 Action required</div>}
+                          {outOfStockCount > 0 && <div className="stat-delta" style={{ color: DS.colors.danger, display: "flex", alignItems: "center", gap: 3 }}><AlertTriangle size={10} /> Action required</div>}
                         </div>
                       </div>
                       <div className="chart-card">
-                        <div className="chart-title">⚠ Low Stock & Out of Stock Alerts</div>
+                        <div className="chart-title" style={{ display: "flex", alignItems: "center", gap: 6 }}><AlertTriangle size={14} /> Low Stock & Out of Stock Alerts</div>
                         <div style={{ fontSize: 12, color: DS.colors.textMuted, marginBottom: 12 }}>
                           Thresholds: E-Liquids ≤5 · Prefilled Pods ≤3 · Refillable Kits ≤2 · Refillable Pods ≤4
                         </div>
@@ -3028,7 +3096,7 @@ function ManagerView({ user }) {
                           );
                         })}
                         {lowStockProducts.length === 0 && (
-                          <div style={{ textAlign: "center", padding: 40, color: DS.colors.textMuted }}>✅ All stock levels are healthy</div>
+                          <div style={{ textAlign: "center", padding: 40, color: DS.colors.textMuted, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}><CheckCircle2 size={14} /> All stock levels are healthy</div>
                         )}
                       </div>
                     </>
@@ -3061,7 +3129,7 @@ function ManagerView({ user }) {
                     <div className={`log-dot ${entry.result === "pass" ? "log-dot-pass" : "log-dot-fail"}`} />
                     <div className="log-time">{new Date(entry.verified_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}</div>
                     <div className="log-method">{(entry.method || "").replace(/_/g, " ")}</div>
-                    <div className={entry.result === "pass" ? "log-result-pass" : "log-result-fail"}>{entry.result === "pass" ? "✓ PASS" : "✗ FAIL"}</div>
+                    <div className={entry.result === "pass" ? "log-result-pass" : "log-result-fail"} style={{ display: "flex", alignItems: "center", gap: 3 }}>{entry.result === "pass" ? <><Check size={11} /> PASS</> : <><X size={11} /> FAIL</>}</div>
                     <div className="log-anon">{entry.user_token_hash || "anon"}</div>
                   </div>
                 ))}
@@ -3147,7 +3215,7 @@ function ManagerView({ user }) {
             {[
               {
                 key: "orders",
-                icon: "🧾",
+                icon: FileText,
                 title: "Orders",
                 desc: "All orders in the date range — order ID, date, status, total, payment method and verification ID.",
                 fn: exportOrders,
@@ -3155,7 +3223,7 @@ function ManagerView({ user }) {
               },
               {
                 key: "products",
-                icon: "📦",
+                icon: Package,
                 title: "Product Sales",
                 desc: "Aggregated sales by product for completed orders — units sold and total revenue per product.",
                 fn: exportProductSales,
@@ -3163,17 +3231,17 @@ function ManagerView({ user }) {
               },
               {
                 key: "compliance",
-                icon: "🔒",
+                icon: Shield,
                 title: "Compliance Log",
                 desc: "Full age verification log — verification ID, date, method, result and anonymised token hash.",
                 fn: exportCompliance,
                 columns: ["Verification ID", "Date & Time", "Method", "Result", "Token Hash"],
               },
-            ].map(({ key, icon, title, desc, fn, columns }) => (
+            ].map(({ key, icon: ExportIcon, title, desc, fn, columns }) => (
               <div key={key} className="chart-card" style={{ maxWidth: 520 }}>
                 <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16 }}>
                   <div style={{ flex: 1 }}>
-                    <div className="chart-title" style={{ marginBottom: 6 }}>{icon} {title}</div>
+                    <div className="chart-title" style={{ marginBottom: 6, display: "flex", alignItems: "center", gap: 7 }}>{ExportIcon && <ExportIcon size={15} />} {title}</div>
                     <div style={{ fontSize: 13, color: DS.colors.textMuted, marginBottom: 12 }}>{desc}</div>
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                       {columns.map(col => (
@@ -3235,7 +3303,7 @@ function ManagerView({ user }) {
                     disabled={pinSaving || pinEdit.length < 4 || pinEdit === currentPin}
                     style={pinSaved ? { background: DS.colors.accentGlow, color: DS.colors.accent, borderColor: DS.colors.accent } : {}}
                   >
-                    {pinSaving ? "Saving…" : pinSaved ? "✓ Saved" : "Update PIN"}
+                    {pinSaving ? "Saving…" : pinSaved ? <span style={{ display: "flex", alignItems: "center", gap: 4 }}><Check size={12} /> Saved</span> : "Update PIN"}
                   </button>
                 </div>
                 {pinEdit.length > 0 && pinEdit.length < 4 && (
@@ -3391,7 +3459,7 @@ function DeviceMonitor({ venues }) {
                 color: d.isOnline ? DS.colors.accent : DS.colors.danger,
                 minWidth: 64, textAlign: "center",
               }}>
-                {d.isOnline ? "● online" : "● offline"}
+                <Circle size={7} fill={d.isOnline ? DS.colors.accent : DS.colors.danger} stroke="none" style={{ display: "inline-block", verticalAlign: "middle", marginRight: 4 }} />{d.isOnline ? "online" : "offline"}
               </span>
             </div>
           </div>
@@ -3787,14 +3855,14 @@ function AdminView() {
   };
 
   const navItems = [
-    { id: "venues",     icon: "🏢", label: "Venues" },
-    { id: "users",      icon: "👥", label: "Users" },
-    { id: "stock",      icon: "📦", label: "Stock" },
-    { id: "purchasing", icon: "🛒", label: "Purchasing" },
-    { id: "devices",    icon: "📱", label: "Devices" },
-    { id: "financials", icon: "💰", label: "Financials" },
-    { id: "billing",    icon: "💳", label: "Billing" },
-    { id: "settings",  icon: "⚙️",  label: "Settings" },
+    { id: "venues",     icon: Building2,      label: "Venues" },
+    { id: "users",      icon: Users,          label: "Users" },
+    { id: "stock",      icon: Package,        label: "Stock" },
+    { id: "purchasing", icon: ShoppingCart,   label: "Purchasing" },
+    { id: "devices",    icon: Monitor,        label: "Devices" },
+    { id: "financials", icon: PoundSterling,  label: "Financials" },
+    { id: "billing",    icon: CreditCard,     label: "Billing" },
+    { id: "settings",   icon: Settings,       label: "Settings" },
   ];
 
   return (
@@ -3803,14 +3871,17 @@ function AdminView() {
         <div style={{ padding: "0 16px 16px", borderBottom: `1px solid ${DS.colors.border}`, marginBottom: 8 }}>
           <div style={{ fontSize: 11, color: DS.colors.textMuted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>Platform</div>
           <div style={{ fontSize: 15, fontWeight: 700 }}>JarvID Admin</div>
-          <div style={{ fontSize: 12, color: DS.colors.accent }}>● System Healthy</div>
+          <div style={{ fontSize: 12, color: DS.colors.accent, display: "flex", alignItems: "center", gap: 4 }}><Circle size={7} fill={DS.colors.accent} stroke="none" /> System Healthy</div>
         </div>
         <div className="sidebar-section">Management</div>
-        {navItems.map(item => (
-          <div key={item.id} className={`sidebar-item ${adminSection === item.id ? "active" : ""}`} onClick={() => setAdminSection(item.id)}>
-            {item.icon} {item.label}
-          </div>
-        ))}
+        {navItems.map(item => {
+          const AdminNavIcon = item.icon;
+          return (
+            <div key={item.id} className={`sidebar-item ${adminSection === item.id ? "active" : ""}`} onClick={() => setAdminSection(item.id)}>
+              {AdminNavIcon && <AdminNavIcon size={15} />} {item.label}
+            </div>
+          );
+        })}
       </div>
 
       <div className="manager-content">
@@ -3877,7 +3948,7 @@ function AdminView() {
                     <div className="venue-top">
                       <div>
                         <div className="venue-name">{v.name}</div>
-                        <div className="venue-loc">📍 {v.location}</div>
+                        <div className="venue-loc" style={{ display: "flex", alignItems: "center", gap: 4 }}><MapPin size={11} /> {v.location}</div>
                       </div>
                       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
                         <div className={`online-dot ${v.status === "online" ? "dot-online" : "dot-offline"}`} />
@@ -3889,8 +3960,8 @@ function AdminView() {
                       <div className="venue-sales">{fmt(v.todaySales || 0)}</div>
                     </div>
                     <div className="venue-meta">
-                      <span>📱 {v.kiosks || 1} kiosk{(v.kiosks || 1) !== 1 ? "s" : ""}</span>
-                      <span style={{ color: v.status === "online" ? DS.colors.accent : DS.colors.danger }}>● {v.status}</span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 4 }}><Tablet size={11} /> {v.kiosks || 1} kiosk{(v.kiosks || 1) !== 1 ? "s" : ""}</span>
+                      <span style={{ color: v.status === "online" ? DS.colors.accent : DS.colors.danger, display: "flex", alignItems: "center", gap: 4 }}><Circle size={7} fill={v.status === "online" ? DS.colors.accent : DS.colors.danger} stroke="none" /> {v.status}</span>
                     </div>
                     <div style={{ marginBottom: 10 }}>
                       <div style={{ fontSize: 11, color: DS.colors.textMuted, marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.06em" }}>Kiosk PIN</div>
@@ -4081,7 +4152,7 @@ function AdminView() {
               <>
                 {reorderAlerts.length > 0 && (
                   <div className="chart-card" style={{ border: `1px solid ${DS.colors.warn}33` }}>
-                    <div className="chart-title" style={{ color: DS.colors.warn }}>⚠ Reorder Alerts ({reorderAlerts.length})</div>
+                    <div className="chart-title" style={{ color: DS.colors.warn, display: "flex", alignItems: "center", gap: 6 }}><AlertTriangle size={14} /> Reorder Alerts ({reorderAlerts.length})</div>
                     <table className="data-table">
                       <thead><tr><th>Venue</th><th>Product</th><th>Stock</th><th>Min</th><th>Suggested Qty</th><th></th></tr></thead>
                       <tbody>
@@ -4141,7 +4212,7 @@ function AdminView() {
                             <input style={{ ...inputStyle, flex: 2 }} value={it.name || ""} onChange={e => { const items = [...poFormData.items]; items[idx] = { ...items[idx], name: e.target.value }; setPOFormData(d => ({ ...d, items })); }} placeholder="Product name" />
                           )}
                           <input style={{ ...inputStyle, width: 80, flex: "none" }} type="number" min={1} value={it.qty || ""} onChange={e => { const items = [...poFormData.items]; items[idx] = { ...items[idx], qty: Number(e.target.value) }; setPOFormData(d => ({ ...d, items })); }} placeholder="Qty" />
-                          <button className="btn-sm btn-outline" style={{ color: DS.colors.danger, borderColor: DS.colors.danger, flex: "none" }} onClick={() => setPOFormData(d => ({ ...d, items: d.items.filter((_, i) => i !== idx) }))}>✕</button>
+                          <button className="btn-sm btn-outline" style={{ color: DS.colors.danger, borderColor: DS.colors.danger, flex: "none" }} onClick={() => setPOFormData(d => ({ ...d, items: d.items.filter((_, i) => i !== idx) }))}><X size={12} /></button>
                         </div>
                       ))}
                       <button className="btn-sm btn-outline" onClick={() => setPOFormData(d => ({ ...d, items: [...d.items, { name: "", qty: 1, product_id: null, _key: crypto.randomUUID() }] }))}>+ Add Item</button>
@@ -4616,10 +4687,10 @@ export default function App() {
   const isAdmin = user?.role === "admin";
 
   const tabs = [
-    { id: "kiosk",   label: "🖥 Customer Kiosk", show: !isStaffMode },
-    { id: "staff",   label: "👤 Staff Dashboard", show: !!user && !kioskLocked },
-    { id: "manager", label: "📊 Venue Manager", show: (isManager || isOrgAdmin || isAdmin) && !kioskLocked },
-    { id: "admin",   label: "⚙️ Platform Admin", show: isAdmin && !kioskLocked },
+    { id: "kiosk",   label: "Customer Kiosk",  icon: Monitor,        show: !isStaffMode },
+    { id: "staff",   label: "Staff Dashboard", icon: User,           show: !!user && !kioskLocked },
+    { id: "manager", label: "Venue Manager",   icon: LayoutDashboard,show: (isManager || isOrgAdmin || isAdmin) && !kioskLocked },
+    { id: "admin",   label: "Platform Admin",  icon: Settings,       show: isAdmin && !kioskLocked },
   ].filter(t => t.show);
 
   return (
@@ -4642,7 +4713,7 @@ export default function App() {
                 ))}
                 <button className="pin-key" onClick={() => handlePinKey("clear")} style={{ fontSize: 13, color: DS.colors.textMuted }}>CLR</button>
                 <button className="pin-key" onClick={() => handlePinKey("0")}>0</button>
-                <button className="pin-key" onClick={() => handlePinKey("back")} style={{ fontSize: 13 }}>⌫</button>
+                <button className="pin-key" onClick={() => handlePinKey("back")}><X size={16} /></button>
               </div>
               <div className="pin-error-msg">{pinError}</div>
               <button className="btn-sm btn-outline" style={{ marginTop: 8, width: "100%" }} onClick={() => { setShowPinOverlay(false); setPinEntry(""); setPinError(""); }}>Cancel</button>
@@ -4653,21 +4724,25 @@ export default function App() {
         <nav className="top-nav">
           <div className="nav-logo" onClick={handleLogoTap} style={{ cursor: kioskLocked ? "default" : "pointer", userSelect: "none" }}>J<span>arv</span>ID</div>
           <div className="nav-tabs">
-            {tabs.map(t => (
-              <button key={t.id} className={`nav-tab ${activeTab === t.id ? "active" : ""}`} onClick={() => {
-                if (!t.public && !user) { setShowLogin(true); return; }
-                setActiveTab(t.id);
-              }}>
-                {t.label}
-                {t.id === "staff" && pendingCount > 0 && <span className="badge" style={{ marginLeft: 6 }}>{pendingCount}</span>}
-              </button>
-            ))}
+            {tabs.map(t => {
+              const TabIcon = t.icon;
+              return (
+                <button key={t.id} className={`nav-tab ${activeTab === t.id ? "active" : ""}`} onClick={() => {
+                  if (!t.public && !user) { setShowLogin(true); return; }
+                  setActiveTab(t.id);
+                }} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  {TabIcon && <TabIcon size={13} />}
+                  {t.label}
+                  {t.id === "staff" && pendingCount > 0 && <span className="badge" style={{ marginLeft: 2 }}>{pendingCount}</span>}
+                </button>
+              );
+            })}
           </div>
           <div className="nav-right">
             {user && !kioskLocked ? (
               <>
                 <div className="auth-role-badge">
-                  {user.role === "admin" ? "⚙️" : user.role === "org_admin" ? "🏢" : user.role === "manager" ? "📊" : "👤"} {user.role === "org_admin" ? "Org Admin" : user.role.charAt(0).toUpperCase() + user.role.slice(1)}
+                  {(() => { const RoleIcon = user.role === "admin" ? Settings : user.role === "org_admin" ? Building2 : user.role === "manager" ? LayoutDashboard : User; return <RoleIcon size={12} />; })()} {user.role === "org_admin" ? "Org Admin" : user.role.charAt(0).toUpperCase() + user.role.slice(1)}
                 </div>
                 <span style={{ fontSize: 12, color: DS.colors.textSub }}>{user.email}</span>
                 <button className="logout-btn" onClick={handleLogout}>Sign Out</button>
@@ -4679,7 +4754,7 @@ export default function App() {
                 Staff Login
               </button>
             )}
-            <span style={{ fontSize: 12, color: DS.colors.accent }}>● Live</span>
+            <span style={{ fontSize: 12, color: DS.colors.accent, display: "flex", alignItems: "center", gap: 4 }}><Circle size={7} fill={DS.colors.accent} stroke="none" /> Live</span>
           </div>
         </nav>
         <div className="main-content">
@@ -4687,14 +4762,14 @@ export default function App() {
           {activeTab === "staff" && (user ? <StaffView user={user} kioskoidMode={false} /> : <LoginScreen onLogin={handleLogin} />)}
           {activeTab === "manager" && ((isManager || isOrgAdmin || isAdmin) ? <ManagerView user={user} /> : (
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", flexDirection: "column", gap: 16, color: DS.colors.textMuted }}>
-              <div style={{ fontSize: 48 }}>🔒</div>
+              <Lock size={48} strokeWidth={1.5} />
               <div style={{ fontSize: 18, fontWeight: 600 }}>Manager access required</div>
               <div style={{ fontSize: 13 }}>Please log in with a manager account</div>
             </div>
           ))}
           {activeTab === "admin" && (isAdmin ? <AdminView /> : (
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", flexDirection: "column", gap: 16, color: DS.colors.textMuted }}>
-              <div style={{ fontSize: 48 }}>🔒</div>
+              <Lock size={48} strokeWidth={1.5} />
               <div style={{ fontSize: 18, fontWeight: 600 }}>Admin access required</div>
               <div style={{ fontSize: 13 }}>Please log in with a platform admin account</div>
             </div>
