@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jarv-ID | Self-Service Vape Kiosks for UK Venues</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #09090b;
+    --surface: #111113;
+    --card: #18181b;
+    --border: #27272a;
+    --border-light: #3f3f46;
+    --accent: #f0a830;
+    --accent-glow: rgba(240,168,48,0.12);
+    --text: #fafaf9;
+    --text-sub: #a1a1aa;
+    --text-muted: #52525b;
+    --font-display: 'Bebas Neue', sans-serif;
+    --font-body: 'Outfit', sans-serif;
+  }
+
+  html { scroll-behavior: smooth; }
+  body { background: var(--bg); color: var(--text); font-family: var(--font-body); line-height: 1.6; }
+
+  /* NAV */
+  nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 48px; height: 64px;
+    background: rgba(9,9,11,0.85); backdrop-filter: blur(16px);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-logo { font-family: var(--font-display); font-size: 28px; letter-spacing: 0.08em; color: var(--text); line-height: 1; }
+  .nav-logo span { color: var(--accent); }
+  .nav-cta {
+    padding: 10px 24px; border-radius: 8px;
+    background: var(--accent); color: #09090b;
+    font-weight: 700; font-size: 14px; letter-spacing: 0.04em;
+    border: none; cursor: pointer; text-decoration: none;
+  }
+
+  /* INLINE LOGO — used inline in body copy */
+  .inline-logo {
+    font-family: var(--font-display);
+    font-size: 1em;
+    letter-spacing: 0.06em;
+    color: var(--text);
+    white-space: nowrap;
+  }
+  .inline-logo span { color: var(--accent); }
+
+  /* HERO */
+  .hero {
+    min-height: 100vh;
+    padding-top: 64px;
+    display: grid;
+    grid-template-columns: 1fr 480px;
+    max-width: 1280px; margin: 0 auto; padding-inline: 48px;
+    gap: 64px;
+    align-items: center;
+  }
+
+  .hero-left { padding: 80px 0; }
+
+  .hero-eyebrow {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 6px 14px; border-radius: 100px;
+    border: 1px solid var(--border-light);
+    background: var(--card);
+    font-size: 12px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--accent); margin-bottom: 28px;
+  }
+  .hero-eyebrow::before {
+    content: ''; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 0 8px var(--accent);
+  }
+
+  .hero-headline {
+    font-family: var(--font-display);
+    font-size: clamp(52px, 6vw, 88px);
+    line-height: 0.95; letter-spacing: 0.03em;
+    color: var(--text); margin-bottom: 24px;
+  }
+  .hero-headline .amber { color: var(--accent); }
+
+  .hero-sub {
+    font-size: 18px; color: var(--text-sub); font-weight: 300;
+    max-width: 480px; margin-bottom: 40px; line-height: 1.7;
+  }
+
+  .hero-proof {
+    display: flex; gap: 32px; align-items: center;
+    padding-top: 40px; border-top: 1px solid var(--border);
+  }
+  .proof-num {
+    font-family: var(--font-display); font-size: 36px;
+    color: var(--accent); letter-spacing: 0.04em;
+  }
+  .proof-label { font-size: 13px; color: var(--text-muted); }
+
+  /* FORM CARD */
+  .hero-form-wrap {
+    background: var(--card);
+    border: 1px solid var(--border-light);
+    border-radius: 16px;
+    padding: 36px;
+    box-shadow: 0 24px 64px rgba(0,0,0,0.5), 0 0 0 1px rgba(240,168,48,0.06);
+  }
+
+  .form-title {
+    font-family: var(--font-display); font-size: 28px; letter-spacing: 0.04em;
+    margin-bottom: 6px;
+  }
+  .form-sub { font-size: 14px; color: var(--text-sub); margin-bottom: 28px; }
+
+  .form-row { margin-bottom: 16px; }
+  .form-row label {
+    display: block; font-size: 12px; font-weight: 600;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--text-sub); margin-bottom: 7px;
+  }
+  .form-row label .req { color: var(--accent); margin-left: 2px; }
+  .form-row input, .form-row select {
+    width: 100%; padding: 12px 16px;
+    background: var(--surface); border: 1px solid var(--border-light);
+    border-radius: 8px; color: var(--text); font-family: var(--font-body);
+    font-size: 15px; outline: none; transition: border-color 0.15s;
+    appearance: none;
+  }
+  .form-row input:focus, .form-row select:focus { border-color: var(--accent); }
+  .form-row input::placeholder { color: var(--text-muted); }
+  .form-row select option { background: var(--card); color: var(--text); }
+
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+
+  .form-submit {
+    width: 100%; padding: 16px;
+    background: var(--accent); color: #09090b;
+    font-family: var(--font-display); font-size: 22px; letter-spacing: 0.08em;
+    border: none; border-radius: 10px; cursor: pointer;
+    transition: all 0.15s; margin-top: 8px;
+    box-shadow: 0 4px 24px rgba(240,168,48,0.3);
+  }
+  .form-submit:hover { background: #f5b840; box-shadow: 0 6px 32px rgba(240,168,48,0.45); }
+
+  .form-note { font-size: 12px; color: var(--text-muted); text-align: center; margin-top: 14px; }
+
+  /* FEATURES */
+  .features {
+    max-width: 1280px; margin: 0 auto;
+    padding: 120px 48px;
+  }
+  .features-label {
+    font-size: 15px; font-weight: 600; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--accent); margin-bottom: 16px;
+  }
+  .features-title {
+    font-family: var(--font-display); font-size: clamp(36px, 4vw, 56px);
+    letter-spacing: 0.03em; margin-bottom: 64px; max-width: 600px;
+    line-height: 1;
+  }
+
+  .features-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+
+  .feature-card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 16px; padding: 32px;
+    transition: border-color 0.2s;
+  }
+  .feature-card:hover { border-color: var(--border-light); }
+
+  .feature-icon {
+    width: 48px; height: 48px; border-radius: 12px;
+    background: var(--accent-glow); border: 1px solid rgba(240,168,48,0.2);
+    display: flex; align-items: center; justify-content: center;
+    margin-bottom: 20px; color: var(--accent);
+  }
+  .feature-icon svg { width: 22px; height: 22px; }
+
+  .feature-card h3 {
+    font-family: var(--font-display); font-size: 24px; letter-spacing: 0.04em;
+    margin-bottom: 12px;
+  }
+  .feature-card p { font-size: 15px; color: var(--text-sub); line-height: 1.7; }
+
+  .feature-list { list-style: none; margin-top: 20px; display: flex; flex-direction: column; gap: 8px; }
+  .feature-list li {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 14px; color: var(--text-sub);
+  }
+  .feature-list li::before {
+    content: ''; width: 5px; height: 5px; border-radius: 50%;
+    background: var(--accent); flex-shrink: 0;
+  }
+
+  /* HOW IT WORKS */
+  .how {
+    background: var(--surface);
+    border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+    padding: 100px 48px;
+  }
+  .how-inner { max-width: 1280px; margin: 0 auto; }
+  .how-label { font-size: 15px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); margin-bottom: 16px; }
+  .how-title { font-family: var(--font-display); font-size: clamp(36px, 4vw, 56px); letter-spacing: 0.03em; margin-bottom: 56px; line-height: 1; }
+
+  .steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; }
+  .step-num {
+    font-family: var(--font-display); font-size: 64px; color: var(--border-light);
+    line-height: 1; margin-bottom: 16px;
+  }
+  .step h4 { font-size: 16px; font-weight: 600; margin-bottom: 8px; }
+  .step p { font-size: 14px; color: var(--text-sub); line-height: 1.6; }
+
+  /* FOOTER CTA */
+  .footer-cta {
+    text-align: center; padding: 100px 48px;
+    background: radial-gradient(ellipse 60% 50% at 50% 50%, rgba(240,168,48,0.07) 0%, transparent 70%);
+  }
+  .footer-cta h2 {
+    font-family: var(--font-display); font-size: clamp(40px, 5vw, 72px);
+    letter-spacing: 0.04em; margin-bottom: 16px; line-height: 1;
+  }
+  .footer-cta p { font-size: 18px; color: var(--text-sub); margin-bottom: 36px; }
+  .footer-cta a {
+    display: inline-block; padding: 18px 48px;
+    background: var(--accent); color: #09090b;
+    font-family: var(--font-display); font-size: 24px; letter-spacing: 0.08em;
+    border-radius: 12px; text-decoration: none;
+    box-shadow: 0 4px 32px rgba(240,168,48,0.35);
+  }
+
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 32px 48px;
+    display: flex; justify-content: space-between; align-items: center;
+    max-width: 1280px; margin: 0 auto;
+    font-size: 13px; color: var(--text-muted);
+  }
+  footer .logo { font-family: var(--font-display); font-size: 20px; color: var(--text-sub); }
+  footer .logo span { color: var(--accent); }
+
+  .form-success {
+    text-align: center; padding: 40px 20px;
+    display: flex; flex-direction: column; align-items: center; gap: 16px;
+  }
+  .form-success svg { color: var(--accent); }
+  .form-success h3 {
+    font-family: var(--font-display); font-size: 28px; letter-spacing: 0.04em;
+  }
+  .form-success p { font-size: 15px; color: var(--text-sub); }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-logo">JARV<span>-ID</span></div>
+  <a href="#form" class="nav-cta">Book a Demo</a>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-left">
+    <div class="hero-eyebrow">Now accepting venue partners</div>
+    <h1 class="hero-headline">
+      SELL SMARTER.<br>
+      STAY <span class="amber">COMPLIANT.</span><br>
+      DO LESS.
+    </h1>
+    <p class="hero-sub">
+      <span class="inline-logo">JARV<span>-ID</span></span> is the self-service vape kiosk built for UK venues. Automated age verification, real-time stock control and zero staff burden in one sleek unit.
+    </p>
+    <div class="hero-proof">
+      <div class="proof-stat">
+        <div class="proof-num">100%</div>
+        <div class="proof-label">Age-verified sales</div>
+      </div>
+      <div class="proof-stat">
+        <div class="proof-num">24/7</div>
+        <div class="proof-label">Always ready to sell</div>
+      </div>
+      <div class="proof-stat">
+        <div class="proof-num">5 min</div>
+        <div class="proof-label">Daily management</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="hero-form-wrap" id="form">
+    <div class="form-title">BOOK A DEMO</div>
+    <p class="form-sub">Tell us about your venue and we'll be in touch within 24 hours.</p>
+
+    <form id="demoForm" novalidate>
+      <div class="form-grid">
+        <div class="form-row">
+          <label>First Name <span class="req">*</span></label>
+          <input type="text" name="first_name" placeholder="John" required>
+        </div>
+        <div class="form-row">
+          <label>Last Name <span class="req">*</span></label>
+          <input type="text" name="last_name" placeholder="Smith" required>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <label>Business Name <span class="req">*</span></label>
+        <input type="text" name="business_name" placeholder="The Crown" required>
+      </div>
+
+      <div class="form-row">
+        <label>Venue Type <span class="req">*</span></label>
+        <select name="venue_type" required>
+          <option value="">Select venue type…</option>
+          <option>Pub / Bar</option>
+          <option>Nightclub</option>
+          <option>18+ Venue</option>
+          <option>Hotel / Hospitality</option>
+          <option>Other</option>
+        </select>
+      </div>
+
+      <div class="form-grid">
+        <div class="form-row">
+          <label>No. of Sites <span class="req">*</span></label>
+          <input type="number" id="numSites" name="num_sites" placeholder="1" min="1" required>
+        </div>
+        <div class="form-row">
+          <label id="postcodeLabel">Postcode <span class="req">*</span></label>
+          <input type="text" id="postcodeInput" name="postcode" placeholder="M1 1AA" required>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <label>Email <span class="req">*</span></label>
+        <input type="email" name="email" placeholder="john@thevenue.co.uk" required>
+      </div>
+
+      <div class="form-row">
+        <label>Phone <span class="req">*</span></label>
+        <input type="tel" name="phone" placeholder="+44 7700 900000" required>
+      </div>
+
+      <button type="submit" class="form-submit" id="submitBtn">REQUEST DEMO</button>
+      <p id="formError" style="display:none;color:#e5433a;font-size:13px;text-align:center;margin-top:10px;"></p>
+      <p class="form-note">No commitment. We'll call to understand your needs first.</p>
+    </form>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section class="features">
+  <p class="features-label">Why <span class="inline-logo">JARV<span>-ID</span></span></p>
+  <h2 class="features-title">EVERYTHING YOUR VENUE NEEDS</h2>
+
+  <div class="features-grid">
+    <div class="feature-card">
+      <div class="feature-icon">
+        <!-- Shield icon -->
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        </svg>
+      </div>
+      <h3>COMPLIANCE BUILT IN</h3>
+      <p>Every sale is age-verified before it happens. Multiple verification methods, full audit trails and automatic refusal keep you covered, always.</p>
+      <ul class="feature-list">
+        <li>Yoti digital ID</li>
+        <li>AI camera estimation</li>
+        <li>Passport &amp; driving licence scan</li>
+        <li>Full compliance logs, exportable</li>
+      </ul>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon">
+        <!-- TrendingUp icon -->
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
+          <polyline points="17 6 23 6 23 12"/>
+        </svg>
+      </div>
+      <h3>GROW YOUR REVENUE</h3>
+      <p>Self-service removes the bottleneck. Customers browse, pick and pay without waiting for staff, increasing throughput and basket size.</p>
+      <ul class="feature-list">
+        <li>Upsell prompts at checkout</li>
+        <li>Frees staff for higher-value tasks</li>
+        <li>Handles peak demand without queues</li>
+        <li>Card &amp; contactless payments</li>
+      </ul>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon">
+        <!-- LayoutDashboard icon -->
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="7" height="7" rx="1"/>
+          <rect x="14" y="3" width="7" height="7" rx="1"/>
+          <rect x="14" y="14" width="7" height="7" rx="1"/>
+          <rect x="3" y="14" width="7" height="7" rx="1"/>
+        </svg>
+      </div>
+      <h3>EFFORTLESS MANAGEMENT</h3>
+      <p>One dashboard for all your venues. Live stock levels, daily sales and kiosk status visible from your phone, tablet or desktop.</p>
+      <ul class="feature-list">
+        <li>Multi-venue, single dashboard</li>
+        <li>Real-time stock alerts</li>
+        <li>Daily sales &amp; trend reports</li>
+        <li>Remote kiosk monitoring</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section class="how">
+  <div class="how-inner">
+    <p class="how-label">How it works</p>
+    <h2 class="how-title">UP AND RUNNING IN DAYS</h2>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">01</div>
+        <h4>Book a demo</h4>
+        <p>We visit your venue (or do a video call) to understand your setup and confirm fit.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">02</div>
+        <h4>We install the kiosk</h4>
+        <p>Our team handles delivery, installation and configuration. Zero disruption to your operation.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">03</div>
+        <h4>Stock &amp; go live</h4>
+        <p>We load your product catalogue, you stock the unit, and it starts selling the same day.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">04</div>
+        <h4>Manage from anywhere</h4>
+        <p>Monitor sales, stock and compliance from your phone. We're on hand if you ever need us.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER CTA -->
+<section class="footer-cta">
+  <h2>READY TO ADD A <span class="inline-logo" style="font-size:inherit;">JARV<span>-ID</span></span>?</h2>
+  <p>Join the growing number of UK venues selling smarter.</p>
+  <a href="#form">Book Your Demo</a>
+</section>
+
+<footer>
+  <div class="logo">JARV<span>-ID</span></div>
+  <span>© 2026 Jarvid Ltd. All rights reserved.</span>
+  <span>jarv-id.com</span>
+</footer>
+
+<script>
+  const FUNCTION_URL = "https://kidyoplpqmvebujypndu.supabase.co/functions/v1/submit-demo-request";
+  const ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtpZHlvcGxwcW12ZWJ1anlwbmR1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMxNTE2NTIsImV4cCI6MjA4ODcyNzY1Mn0.-6NCLaPF8TtJvQ1C0TtT8A24sh9HLjEv1lTJ8Sge6Qg";
+
+  // ── Dynamic postcode label ──────────────────────────────────
+  const numSitesInput = document.getElementById("numSites");
+  const postcodeLabel = document.getElementById("postcodeLabel");
+  const postcodeInput = document.getElementById("postcodeInput");
+
+  function updatePostcodeLabel() {
+    const val = parseInt(numSitesInput.value, 10);
+    const isMulti = !isNaN(val) && val > 1;
+    postcodeLabel.innerHTML = (isMulti ? "HQ Postcode" : "Postcode") + ' <span class="req">*</span>';
+    postcodeInput.placeholder = isMulti ? "Head office postcode" : "M1 1AA";
+  }
+  numSitesInput.addEventListener("input", updatePostcodeLabel);
+
+  // ── Form submission ─────────────────────────────────────────
+  const form = document.getElementById("demoForm");
+  const submitBtn = document.getElementById("submitBtn");
+  const formError = document.getElementById("formError");
+  const formWrap = document.getElementById("form");
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!form.checkValidity()) { form.reportValidity(); return; }
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = "SENDING…";
+    formError.style.display = "none";
+
+    const data = Object.fromEntries(new FormData(form).entries());
+    data.num_sites = parseInt(data.num_sites, 10);
+
+    try {
+      const res = await fetch(FUNCTION_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${ANON_KEY}` },
+        body: JSON.stringify(data),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) throw new Error(json.error || "Unexpected error");
+
+      formWrap.querySelector("form").replaceWith(
+        Object.assign(document.createElement("div"), {
+          className: "form-success",
+          innerHTML: `
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+              <polyline points="22 4 12 14.01 9 11.01"/>
+            </svg>
+            <h3>YOU'RE ON THE LIST</h3>
+            <p>Thanks — we'll be in touch within 24 hours.</p>
+          `,
+        })
+      );
+    } catch (err) {
+      formError.textContent = "Something went wrong. Please try again or email sales@jarv-id.com.";
+      formError.style.display = "block";
+      submitBtn.disabled = false;
+      submitBtn.textContent = "REQUEST DEMO";
+    }
+  });
+</script>
+
+</body>
+</html>
