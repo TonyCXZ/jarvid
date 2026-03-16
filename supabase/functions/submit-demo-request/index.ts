@@ -52,7 +52,7 @@ Phone:         ${req.phone}
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      from: "Jarv-ID <noreply@jarv-id.com>",
+      from: "Jarv-ID <onboarding@resend.dev>",
       to: [NOTIFICATION_EMAIL],
       subject: `New demo request: ${req.business_name}`,
       text: body,
