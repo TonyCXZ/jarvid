@@ -163,14 +163,21 @@ Dependencies loaded from CDN:
 - Google Fonts (Bebas Neue, Outfit)
 - No JavaScript libraries
 
-Form submission backend is out of scope for this spec. The form `action` / API integration will be decided during implementation (options: Formspree, Netlify Forms, custom Supabase edge function).
+**Form submission flow:**
+1. User submits the form
+2. A `fetch` POST sends the data to a Supabase Edge Function (`submit-demo-request`)
+3. The Edge Function inserts a row into a `demo_requests` table in Supabase and sends a notification email to `sales@jarv-id.com` via Resend (or Supabase's built-in email)
+4. On success, the form is replaced with a confirmation message: "Thanks — we'll be in touch within 24 hours."
+5. On error, an inline error message is shown beneath the submit button
+
+**`demo_requests` table columns:** id, created_at, first_name, last_name, business_name, venue_type, num_sites, postcode, email, phone
 
 ---
 
 ## Out of Scope
 
 - Mobile/responsive layout (to be addressed in a follow-up)
-- Form submission backend / confirmation email
+- Confirmation email to the submitter (only a notification to sales@jarv-id.com is in scope)
 - Analytics / tracking scripts
 - Cookie/GDPR banner
 - Adding the JARV-ID logo to the main Jarvid app (noted for a separate task)

@@ -39,7 +39,15 @@ $$;
 
 -- Step 4: Enforce NOT NULL + UNIQUE
 ALTER TABLE venues ALTER COLUMN slug SET NOT NULL;
-ALTER TABLE venues ADD CONSTRAINT IF NOT EXISTS venues_slug_key UNIQUE (slug);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'venues_slug_key'
+  ) THEN
+    ALTER TABLE venues ADD CONSTRAINT venues_slug_key UNIQUE (slug);
+  END IF;
+END;
+$$;
 
 -- Step 5: INSERT trigger for auto-slug on new venues
 -- Created AFTER the UNIQUE constraint so the constraint is always the safety net.
