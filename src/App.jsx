@@ -473,6 +473,116 @@ function VenueNotFound() {
   );
 }
 
+// ─── KioskRoute ───────────────────────────────────────────────────────────────
+function KioskRoute() {
+  const { venueSlug } = useParams();
+  const navigate = useNavigate();
+  const { venueId, loading, notFound } = useVenue(venueSlug);
+
+  // PIN state
+  const [kioskPin, setKioskPin] = useState(null);
+  const [showPinOverlay, setShowPinOverlay] = useState(false);
+  const [pinEntry, setPinEntry] = useState("");
+  const [pinError, setPinError] = useState("");
+  const [pinShake, setPinShake] = useState(false);
+  const [logoTapCount, setLogoTapCount] = useState(0);
+  const logoTapTimer = useRef(null);
+
+  // Load kiosk_pin once venueId is resolved
+  useEffect(() => {
+    if (!venueId) return;
+    supabase.from("venues").select("kiosk_pin").eq("id", venueId).single()
+      .then(({ data }) => setKioskPin(data?.kiosk_pin || "1234"))
+      .catch(() => setKioskPin("1234"));
+  }, [venueId]);
+
+  const handleLogoTap = () => {
+    const newCount = logoTapCount + 1;
+    setLogoTapCount(newCount);
+    clearTimeout(logoTapTimer.current);
+    if (newCount >= 5) {
+      setLogoTapCount(0);
+      setShowPinOverlay(true);
+      setPinEntry("");
+      setPinError("");
+    } else {
+      logoTapTimer.current = setTimeout(() => setLogoTapCount(0), 2000);
+    }
+  };
+
+  const handlePinKey = (key) => {
+    if (key === "clear") { setPinEntry(""); setPinError(""); return; }
+    if (key === "back") { setPinEntry(p => p.slice(0, -1)); setPinError(""); return; }
+    const next = pinEntry + key;
+    setPinEntry(next);
+    if (next.length === 4) {
+      if (next === (kioskPin || "1234")) {
+        setShowPinOverlay(false);
+        setPinEntry("");
+        setPinError("");
+        navigate(`/${venueSlug}/staff`);
+      } else {
+        setPinError("Incorrect PIN. Try again.");
+        setPinShake(true);
+        setTimeout(() => { setPinEntry(""); setPinShake(false); }, 600);
+      }
+    }
+  };
+
+  if (loading) return (
+    <>
+      <GlobalStyles />
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "#0a0a0f" }}>
+        <div className="spinner" />
+      </div>
+    </>
+  );
+  if (notFound) return <VenueNotFound />;
+
+  return (
+    <>
+      <GlobalStyles />
+      <style>{`@keyframes shake { 0%,100%{transform:translateX(0)} 20%,60%{transform:translateX(-8px)} 40%,80%{transform:translateX(8px)} }`}</style>
+      {/* Small fixed logo tap target for staff PIN unlock */}
+      <div
+        onClick={handleLogoTap}
+        style={{
+          position: "fixed", top: 12, left: 16, zIndex: 200,
+          fontFamily: "'Bebas Neue', sans-serif", fontSize: 22,
+          letterSpacing: "0.06em", color: "rgba(255,255,255,0.15)",
+          cursor: "default", userSelect: "none", pointerEvents: "auto"
+        }}
+      >
+        JARV<span style={{ color: "rgba(240,168,48,0.15)" }}>-ID</span>
+      </div>
+      {showPinOverlay && (
+        <div className="pin-overlay">
+          <div className="pin-box" style={{ animation: pinShake ? "shake 0.4s" : "none" }}>
+            <div className="pin-title">Staff Access</div>
+            <div className="pin-sub">Enter your PIN to continue</div>
+            <div className="pin-dots">
+              {[0,1,2,3].map(i => (
+                <div key={i} className={`pin-dot ${pinEntry.length > i ? (pinError ? "error" : "filled") : ""}`} />
+              ))}
+            </div>
+            <div className="pin-grid">
+              {["1","2","3","4","5","6","7","8","9"].map(k => (
+                <button key={k} className="pin-key" onClick={() => handlePinKey(k)}>{k}</button>
+              ))}
+              <button className="pin-key" onClick={() => handlePinKey("clear")} style={{ fontSize: 13, color: DS.colors.textMuted }}>CLR</button>
+              <button className="pin-key" onClick={() => handlePinKey("0")}>0</button>
+              <button className="pin-key" onClick={() => handlePinKey("back")}><X size={16} /></button>
+            </div>
+            <div className="pin-error-msg">{pinError}</div>
+            <button className="btn-sm btn-outline" style={{ marginTop: 8, width: "100%" }} onClick={() => { setShowPinOverlay(false); setPinEntry(""); setPinError(""); }}>Cancel</button>
+          </div>
+        </div>
+      )}
+      <KioskView venueId={venueId} />
+    </>
+  );
+}
+
 // ============================================================
 // UTILITY
 // ============================================================
