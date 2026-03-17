@@ -500,6 +500,8 @@
 <script>
   const FUNCTION_URL = "https://kidyoplpqmvebujypndu.supabase.co/functions/v1/submit-demo-request";
   const ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtpZHlvcGxwcW12ZWJ1anlwbmR1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMxNTE2NTIsImV4cCI6MjA4ODcyNzY1Mn0.-6NCLaPF8TtJvQ1C0TtT8A24sh9HLjEv1lTJ8Sge6Qg";
+  let formStarted = false;
+  let formSubmitSuccess = false;
 
   // ── Dynamic postcode label ──────────────────────────────────
   const numSitesInput = document.getElementById("numSites");
@@ -614,10 +616,8 @@
   });
 
   // ── Form event tracking ──────────────────────────────────────
-  let formStarted = false;
-  let formSubmitSuccess = false;
-
   const trackedFields = ['first_name','last_name','business_name','venue_type','num_sites','postcode','email','phone'];
+  const completedFields = new Set();
 
   trackedFields.forEach(function(fieldName) {
     const el = form.querySelector('[name="' + fieldName + '"]');
@@ -631,8 +631,8 @@
     });
 
     el.addEventListener('blur', function() {
-      const val = el.value != null ? el.value.toString().trim() : '';
-      if (val !== '') {
+      if (!completedFields.has(fieldName) && el.value.trim() !== '') {
+        completedFields.add(fieldName);
         trackEvent('form_field_complete', { field_name: fieldName });
       }
     });
