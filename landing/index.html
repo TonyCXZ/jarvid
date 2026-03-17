@@ -308,6 +308,7 @@
     <p class="hero-sub">
       <span class="inline-logo">JARV<span>-ID</span></span> is the self-service vape kiosk built for UK venues. Automated age verification, real-time stock control and zero staff burden in one sleek unit.
     </p>
+    <a href="#form" class="hero-cta-btn">BOOK A DEMO ↓</a>
     <div class="hero-proof">
       <div class="proof-stat">
         <div class="proof-num">100%</div>
@@ -322,66 +323,6 @@
         <div class="proof-label">Daily management</div>
       </div>
     </div>
-  </div>
-
-  <div class="hero-form-wrap" id="form">
-    <div class="form-title">BOOK A DEMO</div>
-    <p class="form-sub">Tell us about your venue and we'll be in touch within 24 hours.</p>
-
-    <form id="demoForm" novalidate>
-      <div class="form-grid">
-        <div class="form-row">
-          <label>First Name <span class="req">*</span></label>
-          <input type="text" name="first_name" placeholder="John" required>
-        </div>
-        <div class="form-row">
-          <label>Last Name <span class="req">*</span></label>
-          <input type="text" name="last_name" placeholder="Smith" required>
-        </div>
-      </div>
-
-      <div class="form-row">
-        <label>Business Name <span class="req">*</span></label>
-        <input type="text" name="business_name" placeholder="The Crown" required>
-      </div>
-
-      <div class="form-row">
-        <label>Venue Type <span class="req">*</span></label>
-        <select name="venue_type" required>
-          <option value="">Select venue type…</option>
-          <option>Pub / Bar</option>
-          <option>Nightclub</option>
-          <option>18+ Venue</option>
-          <option>Hotel / Hospitality</option>
-          <option>Other</option>
-        </select>
-      </div>
-
-      <div class="form-grid">
-        <div class="form-row">
-          <label>No. of Sites <span class="req">*</span></label>
-          <input type="number" id="numSites" name="num_sites" placeholder="1" min="1" required>
-        </div>
-        <div class="form-row">
-          <label id="postcodeLabel">Postcode <span class="req">*</span></label>
-          <input type="text" id="postcodeInput" name="postcode" placeholder="M1 1AA" required>
-        </div>
-      </div>
-
-      <div class="form-row">
-        <label>Email <span class="req">*</span></label>
-        <input type="email" name="email" placeholder="john@thevenue.co.uk" required>
-      </div>
-
-      <div class="form-row">
-        <label>Phone <span class="req">*</span></label>
-        <input type="tel" name="phone" placeholder="+44 7700 900000" required>
-      </div>
-
-      <button type="submit" class="form-submit" id="submitBtn">REQUEST DEMO</button>
-      <p id="formError" style="display:none;color:#e5433a;font-size:13px;text-align:center;margin-top:10px;"></p>
-      <p class="form-note">No commitment. We'll call to understand your needs first.</p>
-    </form>
   </div>
 </section>
 
@@ -474,6 +415,72 @@
         <h4>Manage from anywhere</h4>
         <p>Monitor sales, stock and compliance from your phone. We're on hand if you ever need us.</p>
       </div>
+    </div>
+  </div>
+</section>
+
+<!-- FORM SECTION -->
+<section class="form-section" id="form">
+  <div class="form-section-inner">
+    <p class="form-section-label">Get Started</p>
+    <h2 class="form-section-title">BOOK YOUR DEMO</h2>
+    <p class="form-section-sub">Tell us about your venue and we'll be in touch within 24 hours.</p>
+    <div class="hero-form-wrap">
+
+      <form id="demoForm" novalidate>
+        <div class="form-grid">
+          <div class="form-row">
+            <label>First Name <span class="req">*</span></label>
+            <input type="text" name="first_name" placeholder="John" required>
+          </div>
+          <div class="form-row">
+            <label>Last Name <span class="req">*</span></label>
+            <input type="text" name="last_name" placeholder="Smith" required>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <label>Business Name <span class="req">*</span></label>
+          <input type="text" name="business_name" placeholder="The Crown" required>
+        </div>
+
+        <div class="form-row">
+          <label>Venue Type <span class="req">*</span></label>
+          <select name="venue_type" required>
+            <option value="">Select venue type…</option>
+            <option>Pub / Bar</option>
+            <option>Nightclub</option>
+            <option>18+ Venue</option>
+            <option>Hotel / Hospitality</option>
+            <option>Other</option>
+          </select>
+        </div>
+
+        <div class="form-grid">
+          <div class="form-row">
+            <label id="numSitesLabel">No. of Sites <span class="req">*</span></label>
+            <input type="number" id="numSites" name="num_sites" placeholder="1" min="1" required>
+          </div>
+          <div class="form-row">
+            <label id="postcodeLabel">Postcode <span class="req">*</span></label>
+            <input type="text" id="postcodeInput" name="postcode" placeholder="M1 1AA" required>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <label>Email <span class="req">*</span></label>
+          <input type="email" name="email" placeholder="john@thevenue.co.uk" required>
+        </div>
+
+        <div class="form-row">
+          <label>Phone <span class="req">*</span></label>
+          <input type="tel" name="phone" placeholder="+44 7700 900000" required>
+        </div>
+
+        <button type="submit" class="form-submit" id="submitBtn">REQUEST DEMO</button>
+        <p id="formError" style="display:none;color:#e5433a;font-size:13px;text-align:center;margin-top:10px;"></p>
+        <p class="form-note">No commitment. We'll call to understand your needs first.</p>
+      </form>
     </div>
   </div>
 </section>
