@@ -527,6 +527,7 @@
     submitBtn.disabled = true;
     submitBtn.textContent = "SENDING…";
     formError.style.display = "none";
+    trackEvent('form_submit_attempt');
 
     const data = Object.fromEntries(new FormData(form).entries());
     data.num_sites = parseInt(data.num_sites, 10);
@@ -540,6 +541,8 @@
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || "Unexpected error");
 
+      formSubmitSuccess = true;
+      trackEvent('form_submit_success');
       formWrap.querySelector("form").replaceWith(
         Object.assign(document.createElement("div"), {
           className: "form-success",
@@ -555,6 +558,7 @@
         })
       );
     } catch (err) {
+      trackEvent('form_submit_error');
       formError.textContent = "Something went wrong. Please try again or email sales@jarv-id.com.";
       formError.style.display = "block";
       submitBtn.disabled = false;
@@ -607,6 +611,37 @@
   document.getElementById('consentDecline').addEventListener('click', function() {
     try { localStorage.setItem(CONSENT_KEY, 'denied'); } catch(e) {}
     document.getElementById('consent-bar').style.display = 'none';
+  });
+
+  // ── Form event tracking ──────────────────────────────────────
+  let formStarted = false;
+  let formSubmitSuccess = false;
+
+  const trackedFields = ['first_name','last_name','business_name','venue_type','num_sites','postcode','email','phone'];
+
+  trackedFields.forEach(function(fieldName) {
+    const el = form.querySelector('[name="' + fieldName + '"]');
+    if (!el) return;
+
+    el.addEventListener('focus', function() {
+      if (!formStarted) {
+        formStarted = true;
+        trackEvent('form_start');
+      }
+    });
+
+    el.addEventListener('blur', function() {
+      const val = el.value != null ? el.value.toString().trim() : '';
+      if (val !== '') {
+        trackEvent('form_field_complete', { field_name: fieldName });
+      }
+    });
+  });
+
+  window.addEventListener('beforeunload', function() {
+    if (formStarted && !formSubmitSuccess) {
+      trackEvent('form_abandon');
+    }
   });
 </script>
 
