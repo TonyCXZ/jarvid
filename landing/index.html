@@ -425,7 +425,7 @@
     <p class="form-section-label">Get Started</p>
     <h2 class="form-section-title">BOOK YOUR DEMO</h2>
     <p class="form-section-sub">Tell us about your venue and we'll be in touch within 24 hours.</p>
-    <div class="hero-form-wrap">
+    <div class="hero-form-wrap" id="form-card">
 
       <form id="demoForm" novalidate>
         <div class="form-grid">
@@ -458,7 +458,7 @@
 
         <div class="form-grid">
           <div class="form-row">
-            <label id="numSitesLabel">No. of Sites <span class="req">*</span></label>
+            <label>No. of Sites <span class="req">*</span></label>
             <input type="number" id="numSites" name="num_sites" placeholder="1" min="1" required>
           </div>
           <div class="form-row">
@@ -527,7 +527,7 @@
   const form = document.getElementById("demoForm");
   const submitBtn = document.getElementById("submitBtn");
   const formError = document.getElementById("formError");
-  const formWrap = document.getElementById("form");
+  const formWrap = document.getElementById("form-card");
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
