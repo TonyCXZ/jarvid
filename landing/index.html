@@ -569,10 +569,13 @@
   let analyticsEnabled = false;
 
   function loadGA() {
+    if (analyticsEnabled) return;
     const script = document.createElement('script');
     script.src = `https://www.googletagmanager.com/gtag/js?id=${GA_MEASUREMENT_ID}`;
     script.async = true;
     document.head.appendChild(script);
+    // These gtag() calls fire before the script loads, but the dataLayer stub queues them.
+    // consent update MUST be queued before config so GA sees granted consent on first hit.
     gtag('consent', 'update', { analytics_storage: 'granted' });
     gtag('config', GA_MEASUREMENT_ID);
     analyticsEnabled = true;
@@ -590,7 +593,8 @@
     if (stored === 'granted') {
       loadGA();
     } else if (stored !== 'denied') {
-      document.getElementById('consent-bar').style.display = 'flex';
+      const bar = document.getElementById('consent-bar');
+      if (bar) bar.style.display = 'flex';
     }
   })();
 
