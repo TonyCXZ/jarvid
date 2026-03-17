@@ -4487,6 +4487,31 @@ function AdminView() {
                       <span style={{ display: "flex", alignItems: "center", gap: 4 }}><Tablet size={11} /> {v.kiosks || 1} kiosk{(v.kiosks || 1) !== 1 ? "s" : ""}</span>
                       <span style={{ color: v.status === "online" ? DS.colors.accent : DS.colors.danger, display: "flex", alignItems: "center", gap: 4 }}><Circle size={7} fill={v.status === "online" ? DS.colors.accent : DS.colors.danger} stroke="none" /> {v.status}</span>
                     </div>
+                    {/* URL Slug */}
+                    <div style={{ marginBottom: 10 }}>
+                      <div style={{ fontSize: 11, color: DS.colors.textMuted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>URL Slug</div>
+                      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                        <span style={{ fontSize: 11, color: DS.colors.textMuted }}>app.jarv-id.com/</span>
+                        <input
+                          type="text"
+                          id={`slug-${v.id}`}
+                          defaultValue={v.slug || ""}
+                          key={`slug-${v.id}`}
+                          placeholder="venue-slug"
+                          style={{ background: DS.colors.surface, border: `1px solid ${DS.colors.border}`, borderRadius: 6, padding: "6px 10px", color: DS.colors.text, fontSize: 13, fontFamily: DS.font.body, width: 140, outline: "none" }}
+                          onChange={e => { e.target.value = e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""); }}
+                        />
+                        <span style={{ fontSize: 11, color: DS.colors.textMuted }}>/kiosk</span>
+                        <button className="btn-sm btn-accent" onClick={async () => {
+                          const input = document.getElementById(`slug-${v.id}`);
+                          const newSlug = input?.value?.trim();
+                          if (!newSlug || !/^[a-z0-9-]+$/.test(newSlug)) { alert("Slug must be lowercase letters, numbers, and hyphens only"); return; }
+                          const { error } = await supabase.from("venues").update({ slug: newSlug }).eq("id", v.id);
+                          if (error?.code === "23505") { alert("This slug is already taken — choose a different one"); }
+                          else if (!error) { input.style.borderColor = DS.colors.accent; setTimeout(() => input.style.borderColor = DS.colors.border, 2000); loadVenues(); }
+                        }}>Save</button>
+                      </div>
+                    </div>
                     <div style={{ marginBottom: 10 }}>
                       <div style={{ fontSize: 11, color: DS.colors.textMuted, marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.06em" }}>Kiosk PIN</div>
                       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
