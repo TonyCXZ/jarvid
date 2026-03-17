@@ -5481,15 +5481,87 @@ function RootPage() {
   );
 }
 
-// Temporary stub — replaced in Task 6
 function StaffDashboard({ user, venueId, onLogout }) {
+  const [activeTab, setActiveTab] = useState(() => {
+    if (user?.role === "admin") return "admin";
+    if (user?.role === "org_admin" || user?.role === "manager") return "manager";
+    return "staff";
+  });
+  const [pendingCount, setPendingCount] = useState(0);
+
+  // Keep pending badge count in sync — scoped to user's venue
+  useEffect(() => {
+    const fetchPending = async () => {
+      let query = supabase.from("orders").select("*", { count: "exact", head: true }).eq("status", "pending");
+      if (user?.venue_id) query = query.eq("venue_id", user.venue_id);
+      const { count } = await query;
+      setPendingCount(count || 0);
+    };
+    fetchPending();
+    const channel = supabase
+      .channel("pending-count")
+      .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, fetchPending)
+      .subscribe();
+    return () => supabase.removeChannel(channel);
+  }, [user?.venue_id]);
+
+  const isStaff = user?.role === "staff";
+  const isManager = user?.role === "manager";
+  const isOrgAdmin = user?.role === "org_admin";
+  const isAdmin = user?.role === "admin";
+
+  const tabs = [
+    { id: "staff",   label: "Staff Dashboard", icon: User,            show: !!user },
+    { id: "manager", label: "Venue Manager",   icon: LayoutDashboard, show: (isManager || isOrgAdmin || isAdmin) },
+    { id: "admin",   label: "Platform Admin",  icon: Settings,        show: isAdmin },
+  ].filter(t => t.show);
+
   return (
     <>
       <GlobalStyles />
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "#0a0a0f", color: "#fff", flexDirection: "column", gap: 16 }}>
-        <div style={{ fontSize: 20, fontWeight: 700 }}>Staff Dashboard</div>
-        <div style={{ fontSize: 14, color: "#888" }}>Venue ID: {venueId}</div>
-        <button onClick={onLogout} style={{ padding: "8px 16px", background: "#1a1a1f", border: "1px solid #333", borderRadius: 8, color: "#fff", cursor: "pointer" }}>Log out</button>
+      <div className="app-root">
+        <nav className="top-nav">
+          <div className="nav-logo">JARV<span>-ID</span></div>
+          <div className="nav-tabs">
+            {tabs.map(t => {
+              const TabIcon = t.icon;
+              return (
+                <button key={t.id} className={`nav-tab ${activeTab === t.id ? "active" : ""}`} onClick={() => {
+                  setActiveTab(t.id);
+                }} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  {TabIcon && <TabIcon size={13} />}
+                  {t.label}
+                  {t.id === "staff" && pendingCount > 0 && <span className="badge" style={{ marginLeft: 2 }}>{pendingCount}</span>}
+                </button>
+              );
+            })}
+          </div>
+          <div className="nav-right">
+            <div className="auth-role-badge">
+              {(() => { const RoleIcon = user.role === "admin" ? Settings : user.role === "org_admin" ? Building2 : user.role === "manager" ? LayoutDashboard : User; return <RoleIcon size={12} />; })()} {user.role === "org_admin" ? "Org Admin" : user.role.charAt(0).toUpperCase() + user.role.slice(1)}
+            </div>
+            <span style={{ fontSize: 12, color: DS.colors.textSub }}>{user.email}</span>
+            <button className="logout-btn" onClick={onLogout}>Sign Out</button>
+            <span style={{ fontSize: 12, color: DS.colors.accent, display: "flex", alignItems: "center", gap: 4 }}><Circle size={7} fill={DS.colors.accent} stroke="none" /> Live</span>
+          </div>
+        </nav>
+        <div className="main-content">
+          {activeTab === "staff" && (user ? <StaffView user={user} kioskoidMode={false} /> : null)}
+          {activeTab === "manager" && ((isManager || isOrgAdmin || isAdmin) ? <ManagerView user={user} /> : (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", flexDirection: "column", gap: 16, color: DS.colors.textMuted }}>
+              <Lock size={48} strokeWidth={1.5} />
+              <div style={{ fontSize: 18, fontWeight: 600 }}>Manager access required</div>
+              <div style={{ fontSize: 13 }}>Please log in with a manager account</div>
+            </div>
+          ))}
+          {activeTab === "admin" && (isAdmin ? <AdminView /> : (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", flexDirection: "column", gap: 16, color: DS.colors.textMuted }}>
+              <Lock size={48} strokeWidth={1.5} />
+              <div style={{ fontSize: 18, fontWeight: 600 }}>Admin access required</div>
+              <div style={{ fontSize: 13 }}>Please log in with a platform admin account</div>
+            </div>
+          ))}
+        </div>
       </div>
     </>
   );
@@ -5552,276 +5624,14 @@ function StaffRoute() {
 }
 
 export default function App() {
-  const urlParams = new URLSearchParams(window.location.search);
-  const isStaffMode = urlParams.get("mode") === "staff";
-
-  const [activeTab, setActiveTab] = useState("kiosk");
-  const [pendingCount, setPendingCount] = useState(0);
-  const [user, setUser] = useState(null);
-  const [authChecked, setAuthChecked] = useState(false);
-  const [showLogin, setShowLogin] = useState(isStaffMode);
-  const [kioskLocked, setKioskLocked] = useState(!isStaffMode);
-  const [showPinOverlay, setShowPinOverlay] = useState(false);
-  const [pinEntry, setPinEntry] = useState("");
-  const [pinError, setPinError] = useState("");
-  const [pinShake, setPinShake] = useState(false);
-  const [logoTapCount, setLogoTapCount] = useState(0);
-  const logoTapTimer = useRef(null);
-  const [kioskPin, setKioskPin] = useState(null);
-  const [kioskVenueId, setKioskVenueId] = useState(null);
-
-
-  // Load kiosk PIN — falls back to "1234" on any error
-  useEffect(() => {
-    const loadPin = async () => {
-      try {
-        const params = new URLSearchParams(window.location.search);
-        const venueParam = params.get("venue");
-        const query = venueParam
-          ? supabase.from("venues").select("id, kiosk_pin").eq("id", venueParam).single()
-          : supabase.from("venues").select("id, kiosk_pin").eq("id", "498c51cc-46b2-41e3-84ab-1a6d48030afb").single();
-        const { data, error } = await query;
-        if (!error && data) {
-          setKioskPin(data.kiosk_pin || "1234");
-          setKioskVenueId(data.id);
-        } else {
-          setKioskPin("1234");
-        }
-      } catch {
-        setKioskPin("1234");
-      }
-    };
-    loadPin();
-  }, []);
-
-  // Check for existing session on mount
-  useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (session?.user) {
-        const { data: staffData } = await supabase
-          .from("staff_users")
-          .select("role, venue_id, org_id")
-          .eq("email", session.user.email)
-          .eq("is_active", true)
-          .single();
-        if (staffData) setUser({ ...session.user, role: staffData.role, venue_id: staffData.venue_id, org_id: staffData.org_id });
-      }
-      setAuthChecked(true);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!session) { setUser(null); setActiveTab("kiosk"); }
-    });
-    return () => subscription.unsubscribe();
-  }, []);
-
-  // Keep pending badge count in sync — scoped to user's venue
-  useEffect(() => {
-    const fetchPending = async () => {
-      let query = supabase.from("orders").select("*", { count: "exact", head: true }).eq("status", "pending");
-      if (user?.venue_id) query = query.eq("venue_id", user.venue_id);
-      const { count } = await query;
-      setPendingCount(count || 0);
-    };
-
-    fetchPending();
-
-    const channel = supabase
-      .channel("pending-count")
-      .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, fetchPending)
-      .subscribe();
-
-    return () => supabase.removeChannel(channel);
-  }, [user?.venue_id]);
-
-  const handleLogoTap = () => {
-    if (!kioskLocked || isStaffMode) return;
-    const newCount = logoTapCount + 1;
-    setLogoTapCount(newCount);
-    clearTimeout(logoTapTimer.current);
-    if (newCount >= 5) {
-      setLogoTapCount(0);
-      setShowPinOverlay(true);
-      setPinEntry("");
-      setPinError("");
-    } else {
-      logoTapTimer.current = setTimeout(() => setLogoTapCount(0), 2000);
-    }
-  };
-
-  const handlePinKey = (key) => {
-    if (key === "clear") { setPinEntry(""); setPinError(""); return; }
-    if (key === "back") { setPinEntry(p => p.slice(0, -1)); setPinError(""); return; }
-    const next = pinEntry + key;
-    setPinEntry(next);
-    if (next.length === 4) {
-      if (next === (kioskPin || "1234")) {
-        setShowPinOverlay(false);
-        setKioskLocked(false);
-        setPinEntry("");
-        setPinError("");
-        setShowLogin(true);
-      } else {
-        setPinError("Incorrect PIN. Try again.");
-        setPinShake(true);
-        setTimeout(() => { setPinEntry(""); setPinShake(false); }, 600);
-      }
-    }
-  };
-
-  const handleLogin = (loggedInUser) => {
-    setUser(loggedInUser);
-    setShowLogin(false);
-    setKioskLocked(false);
-    if (loggedInUser.role === "admin") {
-      setActiveTab("admin");
-    } else if (loggedInUser.role === "org_admin" || loggedInUser.role === "manager") {
-      setActiveTab("manager");
-    } else {
-      setActiveTab("staff");
-    }
-  };
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    setUser(null);
-    if (isStaffMode) {
-      // Staff tablet — drop back to staff orders view, not login
-      setActiveTab("kiosk");
-      setKioskLocked(false);
-      setShowLogin(false);
-    } else {
-      // Kiosk tablet — lock back to kiosk mode
-      setActiveTab("kiosk");
-      setKioskLocked(true);
-    }
-  };
-
-
-
-  if (!authChecked) return <><GlobalStyles /><div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "#0a0a0f" }}><div className="spinner" /></div></>;
-
-  // Staff tablet mode — render StaffView directly, no login, PIN gates actions
-  // Exception: if a manager/admin/org_admin has logged in via the 5-tap flow,
-  // fall through to the full app so they get access to their assigned tabs.
-  const staffModeElevated = isStaffMode && user && ["manager", "org_admin", "admin"].includes(user.role);
-
-  if (isStaffMode && kioskVenueId && kioskPin && !staffModeElevated) {
-    if (showLogin) return <><GlobalStyles /><LoginScreen onLogin={handleLogin} onBack={() => setShowLogin(false)} /></>;
-    return (
-      <>
-        <GlobalStyles />
-        <StaffView
-          user={null}
-          kioskoidMode={true}
-          venueIdOverride={kioskVenueId}
-          kioskPin={kioskPin}
-          onUnlock={() => setShowLogin(true)}
-        />
-      </>
-    );
-  }
-
-  if (showLogin) return <><GlobalStyles /><LoginScreen onLogin={handleLogin} /></>;
-
-
-
-  // Tab visibility based on role
-  const isStaff = user?.role === "staff";
-  const isManager = user?.role === "manager";
-  const isOrgAdmin = user?.role === "org_admin";
-  const isAdmin = user?.role === "admin";
-
-  const tabs = [
-    { id: "kiosk",   label: "Customer Kiosk",  icon: Monitor,        show: !isStaffMode },
-    { id: "staff",   label: "Staff Dashboard", icon: User,           show: !!user && !kioskLocked },
-    { id: "manager", label: "Venue Manager",   icon: LayoutDashboard,show: (isManager || isOrgAdmin || isAdmin) && !kioskLocked },
-    { id: "admin",   label: "Platform Admin",  icon: Settings,       show: isAdmin && !kioskLocked },
-  ].filter(t => t.show);
-
   return (
-    <>
-      <GlobalStyles />
-      <div className="app-root">
-        {showPinOverlay && (
-          <div className="pin-overlay">
-            <div className="pin-box" style={{ animation: pinShake ? "shake 0.4s" : "none" }}>
-              <div className="pin-title">Staff Access</div>
-              <div className="pin-sub">Enter your PIN to continue</div>
-              <div className="pin-dots">
-                {[0,1,2,3].map(i => (
-                  <div key={i} className={`pin-dot ${pinEntry.length > i ? (pinError ? "error" : "filled") : ""}`} />
-                ))}
-              </div>
-              <div className="pin-grid">
-                {["1","2","3","4","5","6","7","8","9"].map(k => (
-                  <button key={k} className="pin-key" onClick={() => handlePinKey(k)}>{k}</button>
-                ))}
-                <button className="pin-key" onClick={() => handlePinKey("clear")} style={{ fontSize: 13, color: DS.colors.textMuted }}>CLR</button>
-                <button className="pin-key" onClick={() => handlePinKey("0")}>0</button>
-                <button className="pin-key" onClick={() => handlePinKey("back")}><X size={16} /></button>
-              </div>
-              <div className="pin-error-msg">{pinError}</div>
-              <button className="btn-sm btn-outline" style={{ marginTop: 8, width: "100%" }} onClick={() => { setShowPinOverlay(false); setPinEntry(""); setPinError(""); }}>Cancel</button>
-            </div>
-          </div>
-        )}
-        <style>{`@keyframes shake { 0%,100%{transform:translateX(0)} 20%,60%{transform:translateX(-8px)} 40%,80%{transform:translateX(8px)} }`}</style>
-        <nav className="top-nav">
-          <div className="nav-logo" onClick={handleLogoTap} style={{ cursor: kioskLocked ? "default" : "pointer", userSelect: "none" }}>JARV<span>-ID</span></div>
-          <div className="nav-tabs">
-            {tabs.map(t => {
-              const TabIcon = t.icon;
-              return (
-                <button key={t.id} className={`nav-tab ${activeTab === t.id ? "active" : ""}`} onClick={() => {
-                  if (!t.public && !user) { setShowLogin(true); return; }
-                  setActiveTab(t.id);
-                }} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  {TabIcon && <TabIcon size={13} />}
-                  {t.label}
-                  {t.id === "staff" && pendingCount > 0 && <span className="badge" style={{ marginLeft: 2 }}>{pendingCount}</span>}
-                </button>
-              );
-            })}
-          </div>
-          <div className="nav-right">
-            {user && !kioskLocked ? (
-              <>
-                <div className="auth-role-badge">
-                  {(() => { const RoleIcon = user.role === "admin" ? Settings : user.role === "org_admin" ? Building2 : user.role === "manager" ? LayoutDashboard : User; return <RoleIcon size={12} />; })()} {user.role === "org_admin" ? "Org Admin" : user.role.charAt(0).toUpperCase() + user.role.slice(1)}
-                </div>
-                <span style={{ fontSize: 12, color: DS.colors.textSub }}>{user.email}</span>
-                <button className="logout-btn" onClick={handleLogout}>Sign Out</button>
-              </>
-            ) : kioskLocked ? (
-              <span style={{ fontSize: 11, color: DS.colors.textMuted, letterSpacing: "0.05em" }}>KIOSK MODE</span>
-            ) : (
-              <button className="logout-btn" style={{ borderColor: DS.colors.accent, color: DS.colors.accent }} onClick={() => setShowLogin(true)}>
-                Staff Login
-              </button>
-            )}
-            <span style={{ fontSize: 12, color: DS.colors.accent, display: "flex", alignItems: "center", gap: 4 }}><Circle size={7} fill={DS.colors.accent} stroke="none" /> Live</span>
-          </div>
-        </nav>
-        <div className="main-content">
-          {activeTab === "kiosk" && <KioskView venueId={kioskVenueId} />}
-          {activeTab === "staff" && (user ? <StaffView user={user} kioskoidMode={false} /> : <LoginScreen onLogin={handleLogin} />)}
-          {activeTab === "manager" && ((isManager || isOrgAdmin || isAdmin) ? <ManagerView user={user} /> : (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", flexDirection: "column", gap: 16, color: DS.colors.textMuted }}>
-              <Lock size={48} strokeWidth={1.5} />
-              <div style={{ fontSize: 18, fontWeight: 600 }}>Manager access required</div>
-              <div style={{ fontSize: 13 }}>Please log in with a manager account</div>
-            </div>
-          ))}
-          {activeTab === "admin" && (isAdmin ? <AdminView /> : (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", flexDirection: "column", gap: 16, color: DS.colors.textMuted }}>
-              <Lock size={48} strokeWidth={1.5} />
-              <div style={{ fontSize: 18, fontWeight: 600 }}>Admin access required</div>
-              <div style={{ fontSize: 13 }}>Please log in with a platform admin account</div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </>
+    <BrowserRouter>
+      <Routes>
+        <Route path="/"                   element={<RootPage />} />
+        <Route path="/:venueSlug/kiosk"   element={<KioskRoute />} />
+        <Route path="/:venueSlug/staff"   element={<StaffRoute />} />
+        <Route path="*"                   element={<VenueNotFound />} />
+      </Routes>
+    </BrowserRouter>
   );
 }
