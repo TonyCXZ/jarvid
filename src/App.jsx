@@ -5378,6 +5378,179 @@ function LoginScreen({ onLogin, onBack }) {
   );
 }
 
+// ─── VenuePicker ─────────────────────────────────────────────────────────────
+function VenuePicker() {
+  const [venues, setVenues] = useState([]);
+
+  useEffect(() => {
+    supabase.from("venues").select("name, slug").order("name")
+      .then(({ data }) => setVenues(data || []));
+  }, []);
+
+  return (
+    <>
+      <GlobalStyles />
+      <div style={{
+        display: "flex", flexDirection: "column", alignItems: "center",
+        justifyContent: "center", minHeight: "100vh",
+        background: "#0a0a0f", color: "#fff", gap: 24, padding: 32
+      }}>
+        <div style={{ fontSize: 22, fontWeight: 700 }}>Select Venue</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, width: "100%", maxWidth: 360 }}>
+          {venues.map(v => (
+            <Link key={v.slug} to={`/${v.slug}/staff`}
+              style={{
+                display: "block", padding: "14px 20px", borderRadius: 12,
+                background: "#1a1a1f", border: "1px solid #2a2a2f",
+                color: "#fff", textDecoration: "none", fontSize: 16, fontWeight: 500
+              }}>
+              {v.name}
+            </Link>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ─── RootPage ─────────────────────────────────────────────────────────────────
+function RootPage() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [authChecked, setAuthChecked] = useState(false);
+  const [user, setUser] = useState(null);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (session?.user) {
+        const { data: staffData } = await supabase
+          .from("staff_users")
+          .select("role, venue_id, org_id")
+          .eq("email", session.user.email)
+          .eq("is_active", true)
+          .single();
+        if (staffData) setUser({ ...session.user, role: staffData.role, venue_id: staffData.venue_id, org_id: staffData.org_id });
+      }
+      setAuthChecked(true);
+    });
+  }, []);
+
+  // Once we know auth state, handle redirects for authenticated users
+  useEffect(() => {
+    if (!authChecked || !user) return;
+
+    const isSuperAdmin = user.role === "super_admin" || !user.venue_id;
+    if (isSuperAdmin) return; // VenuePicker rendered below
+
+    // Normal staff: resolve slug and redirect
+    supabase.from("venues").select("slug").eq("id", user.venue_id).single()
+      .then(({ data }) => {
+        if (!data?.slug) return;
+        // Honour ?next= if present and valid
+        const params = new URLSearchParams(location.search);
+        const next = params.get("next");
+        const validNext = next && next.startsWith("/") && !next.includes("://") ? next : null;
+        navigate(validNext ?? `/${data.slug}/staff`, { replace: true });
+      });
+  }, [authChecked, user, navigate, location.search]);
+
+  if (!authChecked) return (
+    <>
+      <GlobalStyles />
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "#0a0a0f" }}>
+        <div className="spinner" />
+      </div>
+    </>
+  );
+
+  const isSuperAdmin = user?.role === "super_admin" || (user && !user.venue_id);
+
+  if (user && isSuperAdmin) return <VenuePicker />;
+
+  // Not authenticated — show login
+  const handleLogin = (loggedInUser) => {
+    setUser(loggedInUser);
+    // redirect effect will fire on next render
+  };
+
+  return (
+    <>
+      <GlobalStyles />
+      <LoginScreen onLogin={handleLogin} />
+    </>
+  );
+}
+
+// Temporary stub — replaced in Task 6
+function StaffDashboard({ user, venueId, onLogout }) {
+  return (
+    <>
+      <GlobalStyles />
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "#0a0a0f", color: "#fff", flexDirection: "column", gap: 16 }}>
+        <div style={{ fontSize: 20, fontWeight: 700 }}>Staff Dashboard</div>
+        <div style={{ fontSize: 14, color: "#888" }}>Venue ID: {venueId}</div>
+        <button onClick={onLogout} style={{ padding: "8px 16px", background: "#1a1a1f", border: "1px solid #333", borderRadius: 8, color: "#fff", cursor: "pointer" }}>Log out</button>
+      </div>
+    </>
+  );
+}
+
+// ─── StaffRoute ───────────────────────────────────────────────────────────────
+function StaffRoute() {
+  const { venueSlug } = useParams();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { venueId, loading: venueLoading, notFound } = useVenue(venueSlug);
+
+  const [authChecked, setAuthChecked] = useState(false);
+  const [user, setUser] = useState(null);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!session?.user) {
+        navigate(`/?next=${encodeURIComponent(location.pathname)}`, { replace: true });
+        return;
+      }
+      const { data: staffData } = await supabase
+        .from("staff_users")
+        .select("role, venue_id, org_id")
+        .eq("email", session.user.email)
+        .eq("is_active", true)
+        .single();
+      if (staffData) setUser({ ...session.user, role: staffData.role, venue_id: staffData.venue_id, org_id: staffData.org_id });
+      setAuthChecked(true);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!session) navigate("/", { replace: true });
+    });
+    return () => subscription.unsubscribe();
+  }, [navigate, location.pathname]);
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    navigate("/", { replace: true });
+  };
+
+  if (!authChecked || venueLoading) return (
+    <>
+      <GlobalStyles />
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "#0a0a0f" }}>
+        <div className="spinner" />
+      </div>
+    </>
+  );
+  if (notFound) return <VenueNotFound />;
+
+  // StaffDashboard will be wired in Task 6 — placeholder for now
+  return (
+    <>
+      <GlobalStyles />
+      <StaffDashboard user={user} venueId={venueId} onLogout={handleLogout} />
+    </>
+  );
+}
+
 export default function App() {
   const urlParams = new URLSearchParams(window.location.search);
   const isStaffMode = urlParams.get("mode") === "staff";
