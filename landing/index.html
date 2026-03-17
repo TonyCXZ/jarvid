@@ -555,6 +555,49 @@
       submitBtn.textContent = "REQUEST DEMO";
     }
   });
+
+  // ── Analytics & Consent ──────────────────────────────────────
+  const GA_MEASUREMENT_ID = "G-RGMN0H2MPB";
+  const CONSENT_KEY = "jarv_analytics_consent";
+
+  let analyticsEnabled = false;
+
+  function loadGA() {
+    const script = document.createElement('script');
+    script.src = `https://www.googletagmanager.com/gtag/js?id=${GA_MEASUREMENT_ID}`;
+    script.async = true;
+    document.head.appendChild(script);
+    gtag('consent', 'update', { analytics_storage: 'granted' });
+    gtag('config', GA_MEASUREMENT_ID);
+    analyticsEnabled = true;
+  }
+
+  function trackEvent(name, params) {
+    if (!analyticsEnabled) return;
+    gtag('event', name, params || {});
+  }
+
+  // Initialise consent state on page load
+  (function initConsent() {
+    let stored = null;
+    try { stored = localStorage.getItem(CONSENT_KEY); } catch(e) {}
+    if (stored === 'granted') {
+      loadGA();
+    } else if (stored !== 'denied') {
+      document.getElementById('consent-bar').style.display = 'flex';
+    }
+  })();
+
+  document.getElementById('consentAccept').addEventListener('click', function() {
+    try { localStorage.setItem(CONSENT_KEY, 'granted'); } catch(e) {}
+    document.getElementById('consent-bar').style.display = 'none';
+    loadGA();
+  });
+
+  document.getElementById('consentDecline').addEventListener('click', function() {
+    try { localStorage.setItem(CONSENT_KEY, 'denied'); } catch(e) {}
+    document.getElementById('consent-bar').style.display = 'none';
+  });
 </script>
 
 <div id="consent-bar" style="display:none">
