@@ -1,5 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { BrowserRouter, Routes, Route, useParams, useNavigate, useLocation, Link } from "react-router-dom";
 import { supabase } from "./supabase";
+import { loadStripe } from "@stripe/stripe-js";
+import { Elements, CardElement, useStripe, useElements } from "@stripe/react-stripe-js";
+
+const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
 import {
   LayoutGrid, Droplets, Wind, Zap, RefreshCw,
   CreditCard, BookOpen, Smartphone, Camera, User,
@@ -9,7 +14,7 @@ import {
   CheckCircle2, X, XCircle,
   LayoutDashboard, TrendingUp, Package, Warehouse, Shield, Users, Download, Settings,
   FileText,
-  Building2, ShoppingCart, Monitor, PoundSterling,
+  Building2, Network, ShoppingCart, Monitor, PoundSterling,
   MapPin, Tablet, Circle,
 } from "lucide-react";
 
@@ -114,8 +119,8 @@ const GlobalStyles = () => (
 
     /* ── Navigation ── */
     .top-nav { display: flex; align-items: center; gap: 0; background: ${DS.colors.surface}; border-bottom: 1px solid ${DS.colors.border}; box-shadow: 0 1px 0 rgba(240,168,48,0.06); padding: 0 24px; height: 56px; flex-shrink: 0; }
-    .nav-logo { font-family: ${DS.font.display}; font-size: 26px; letter-spacing: 0.06em; color: ${DS.colors.accent}; margin-right: 32px; line-height: 1; }
-    .nav-logo span { color: ${DS.colors.textSub}; }
+    .nav-logo { font-family: ${DS.font.display}; font-size: 26px; letter-spacing: 0.06em; color: ${DS.colors.white}; margin-right: 32px; line-height: 1; }
+    .nav-logo span { color: ${DS.colors.accent}; }
     .nav-tabs { display: flex; gap: 2px; flex: 1; }
     .nav-tab { padding: 6px 16px; border-radius: 6px; font-size: 13px; font-weight: 500; color: ${DS.colors.textSub}; cursor: pointer; border: none; background: transparent; transition: all 0.15s; letter-spacing: 0.01em; font-family: ${DS.font.body}; }
     .nav-tab:hover { color: ${DS.colors.text}; background: ${DS.colors.card}; }
@@ -425,6 +430,48 @@ const GlobalStyles = () => (
     .success-banner { padding: 12px 16px; border-radius: 9px; background: ${DS.colors.accentGlow}; border: 1px solid ${DS.colors.accent}; color: ${DS.colors.accent}; font-size: 13px; margin-bottom: 16px; }
   `}</style>
 );
+
+// ─── useVenue hook ───────────────────────────────────────────────────────────
+// Resolves a URL slug to a venue UUID. Used by KioskRoute and StaffRoute.
+function useVenue(slug) {
+  const [venueId, setVenueId] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
+
+  useEffect(() => {
+    if (!slug) { setLoading(false); setNotFound(true); return; }
+    setLoading(true);
+    setNotFound(false);
+    supabase.from("venues").select("id").eq("slug", slug).single()
+      .then(({ data, error }) => {
+        if (error || !data) { setNotFound(true); }
+        else { setVenueId(data.id); }
+        setLoading(false);
+      });
+  }, [slug]);
+
+  return { venueId, loading, notFound };
+}
+
+// ─── VenueNotFound ────────────────────────────────────────────────────────────
+function VenueNotFound() {
+  return (
+    <>
+      <GlobalStyles />
+      <div style={{
+        display: "flex", flexDirection: "column", alignItems: "center",
+        justifyContent: "center", height: "100vh",
+        background: "#0a0a0f", color: "#fff", gap: 16, fontFamily: "sans-serif"
+      }}>
+        <div style={{ fontSize: 48 }}>🏚</div>
+        <div style={{ fontSize: 22, fontWeight: 700 }}>Venue not found</div>
+        <div style={{ fontSize: 14, color: "#888" }}>
+          Check the URL or contact your administrator.
+        </div>
+      </div>
+    </>
+  );
+}
 
 // ============================================================
 // UTILITY
@@ -949,11 +996,14 @@ function KioskAgeVerify({ onVerified, onBack, onHome, kioskId }) {
 }
 
 // ============================================================
-// KIOSK — PAYMENT (simulated; creates real order in Supabase)
+// KIOSK — PAYMENT (Stripe Elements)
 // ============================================================
-function KioskPayment({ cart, products, onPaid, onBack, onHome, verificationId, kioskId, venueId }) {
-  const [phase, setPhase] = useState("waiting");
+function KioskPaymentInner({ cart, products, onPaid, onBack, onHome, verificationId, kioskId, venueId }) {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [phase, setPhase] = useState("loading"); // loading | waiting | processing | done | error
   const [orderId, setOrderId] = useState(null);
+  const [clientSecret, setClientSecret] = useState(null);
   const [error, setError] = useState(null);
 
   const total = Object.entries(cart).reduce((s, [id, qty]) => {
@@ -961,116 +1011,164 @@ function KioskPayment({ cart, products, onPaid, onBack, onHome, verificationId, 
     return s + (p ? p.price * qty : 0);
   }, 0);
 
-  const createOrder = async () => {
-    try {
-      // 1. Check stock levels before proceeding
-      const cartItems = Object.entries(cart);
-      for (const [id, qty] of cartItems) {
-        const { data: inv } = await supabase
-          .from("inventory")
-          .select("quantity")
-          .eq("product_id", id)
-          .eq("venue_id", venueId)
-          .single();
-        if (!inv || inv.quantity < qty) {
-          const p = products.find(x => x.id === id);
-          throw new Error(`Sorry, "${p?.name || "an item"}" is no longer available in the quantity requested.`);
+  useEffect(() => {
+    const init = async () => {
+      try {
+        // 1. Check stock
+        for (const [id, qty] of Object.entries(cart)) {
+          const { data: inv } = await supabase
+            .from("inventory")
+            .select("quantity")
+            .eq("product_id", id)
+            .eq("venue_id", venueId)
+            .single();
+          if (!inv || inv.quantity < qty) {
+            const p = products.find(x => x.id === id);
+            throw new Error(`Sorry, "${p?.name || "an item"}" is no longer available in the quantity requested.`);
+          }
         }
-      }
 
-      // 2. Create order record
-      const { data: order, error: orderErr } = await supabase
-        .from("orders")
-        .insert({
-          kiosk_id: kioskId || null,
-          venue_id: venueId || null,
-          status: "pending",
-          total_pence: GBPtoPence(total),
-          payment_method: "card",
-          age_verification_id: verificationId || null,
-          created_at: new Date().toISOString(),
-        })
-        .select()
-        .single();
+        // 2. Create order (pending)
+        const { data: order, error: orderErr } = await supabase
+          .from("orders")
+          .insert({
+            kiosk_id: kioskId || null,
+            venue_id: venueId || null,
+            status: "pending",
+            total_pence: GBPtoPence(total),
+            payment_method: "card",
+            age_verification_id: verificationId || null,
+            created_at: new Date().toISOString(),
+          })
+          .select()
+          .single();
+        if (orderErr) throw orderErr;
 
-      if (orderErr) throw orderErr;
-
-      // 2. Create order items
-      const items = Object.entries(cart).map(([id, qty]) => {
-        const p = products.find(x => x.id === id);
-        return {
-          order_id: order.id,
-          product_id: id,
-          quantity: qty,
-          unit_price_pence: GBPtoPence(p?.price || 0),
-        };
-      });
-
-      const { error: itemsErr } = await supabase.from("order_items").insert(items);
-      if (itemsErr) throw itemsErr;
-
-      // 3. Decrement inventory for each item
-      for (const item of items) {
-        await supabase.rpc("decrement_inventory", {
-          p_product_id: item.product_id,
-          p_venue_id: venueId || null,
-          p_quantity: item.quantity,
+        // 3. Create order items
+        const items = Object.entries(cart).map(([id, qty]) => {
+          const p = products.find(x => x.id === id);
+          return { order_id: order.id, product_id: id, quantity: qty, unit_price_pence: GBPtoPence(p?.price || 0) };
         });
-      }
+        const { error: itemsErr } = await supabase.from("order_items").insert(items);
+        if (itemsErr) throw itemsErr;
 
-      return order.id;
-    } catch (e) {
-      console.error("Order creation failed:", e);
-      throw e;
+        // 4. Decrement inventory
+        for (const item of items) {
+          await supabase.rpc("decrement_inventory", { p_product_id: item.product_id, p_venue_id: venueId || null, p_quantity: item.quantity });
+        }
+
+        setOrderId(order.id);
+
+        // 5. Create Stripe payment intent
+        const cartPayload = Object.entries(cart).map(([product_id, qty]) => {
+          const p = products.find(x => x.id === product_id);
+          return { product_id, qty, retail_pence: GBPtoPence(p?.price || 0) };
+        });
+        const { data: piData, error: piErr } = await supabase.functions.invoke("create-payment-intent", {
+          body: { venue_id: venueId, cart: cartPayload, order_id: order.id },
+        });
+        if (piErr || !piData?.client_secret) throw new Error("Failed to initialise payment. Please try again.");
+
+        setClientSecret(piData.client_secret);
+        setPhase("waiting");
+      } catch (e) {
+        console.error("Payment init error:", e);
+        setError("Unable to initialise payment. Please ask a member of staff.");
+        setPhase("error");
+      }
+    };
+    init();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handlePay = async () => {
+    if (!stripe || !elements || phase !== "waiting") return;
+    setPhase("processing");
+    setError(null);
+    const card = elements.getElement(CardElement);
+    const { error: confirmError } = await stripe.confirmCardPayment(clientSecret, {
+      payment_method: { card },
+    });
+    if (confirmError) {
+      setError(confirmError.message);
+      setPhase("waiting");
+    } else {
+      setPhase("done");
+      setTimeout(() => onPaid(orderId), 1500);
     }
   };
 
-  const handleTap = async () => {
-    setPhase("processing");
-    setError(null);
-    try {
-      // Simulate payment delay, then create order
-      await new Promise(r => setTimeout(r, 2500));
-      const oid = await createOrder();
-      setOrderId(oid);
-      setPhase("done");
-      setTimeout(() => onPaid(oid), 1500);
-    } catch (e) {
-      setError(e.message?.includes("no longer available") ? e.message : "Payment failed. Please try again.");
-      setPhase("waiting");
-    }
+  const cardStyle = {
+    base: {
+      color: DS.colors.text,
+      fontFamily: DS.font.body,
+      fontSize: "16px",
+      "::placeholder": { color: DS.colors.textMuted },
+      iconColor: DS.colors.accent,
+    },
+    invalid: { color: DS.colors.danger },
   };
 
   return (
     <div className="payment-screen" style={{ position: "relative" }}>
       <KioskNav onBack={phase === "waiting" ? onBack : undefined} onHome={phase !== "done" ? onHome : undefined} showBack={phase === "waiting"} />
-      {error && (
-        <div className="error-banner" style={{ margin: "0 20px 16px" }}>
-          {error}
-        </div>
-      )}
+      {error && <div className="error-banner" style={{ margin: "0 20px 16px" }}>{error}</div>}
       <div className="payment-heading">
-        {phase === "done" ? <span style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "center" }}><CheckCircle2 size={20} /> PAYMENT SUCCESS</span> : phase === "processing" ? "PROCESSING…" : "READY TO PAY"}
+        {phase === "done"
+          ? <span style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "center" }}><CheckCircle2 size={20} /> PAYMENT SUCCESS</span>
+          : phase === "processing" ? "PROCESSING…"
+          : phase === "loading" ? "PREPARING PAYMENT…"
+          : phase === "error" ? "PAYMENT UNAVAILABLE"
+          : "ENTER CARD DETAILS"}
       </div>
       <div className="payment-amount">{fmt(total)}</div>
-      <div className="payment-terminal" onClick={phase === "waiting" ? handleTap : undefined}
-        style={{ cursor: phase === "waiting" ? "pointer" : "default" }}>
-        <div className="nfc-icon" style={{ borderColor: phase === "done" ? DS.colors.accent : phase === "processing" ? DS.colors.blue : DS.colors.accent }}>
-          {phase === "done" ? <Check size={36} /> : phase === "processing" ? <Loader2 size={36} style={{ animation: "spin 1s linear infinite" }} /> : <Wifi size={36} />}
+
+      {(phase === "loading" || phase === "error") && (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginTop: 32, gap: 16 }}>
+          {phase === "loading"
+            ? <Loader2 size={40} style={{ animation: "spin 1s linear infinite", color: DS.colors.accent }} />
+            : <XCircle size={40} style={{ color: DS.colors.danger }} />}
+          {phase === "error" && (
+            <button className="btn-sm btn-outline" onClick={onBack} style={{ marginTop: 8 }}>Go Back</button>
+          )}
         </div>
-        <div style={{ fontSize: 14, color: DS.colors.textSub, textAlign: "center" }}>
-          {phase === "waiting" ? "Tap card, phone or watch" : phase === "processing" ? "Processing payment…" : "Payment complete!"}
+      )}
+
+      {phase === "done" && (
+        <div style={{ display: "flex", justifyContent: "center", marginTop: 32 }}>
+          <div className="nfc-icon" style={{ borderColor: DS.colors.accent }}><Check size={36} /></div>
         </div>
-        <div className="pay-methods">
-          {["Card", "Apple Pay", "Google Pay"].map(m => (
-            <div key={m} className="pay-method">{m}</div>
-          ))}
+      )}
+
+      {(phase === "waiting" || phase === "processing") && clientSecret && (
+        <div style={{ margin: "0 20px", display: "flex", flexDirection: "column", gap: 16 }}>
+          <div style={{ background: DS.colors.card, border: `1px solid ${DS.colors.border}`, borderRadius: 12, padding: "18px 20px" }}>
+            <CardElement options={{ style: cardStyle, hidePostalCode: true }} />
+          </div>
+          <button
+            className="btn-accent"
+            style={{ width: "100%", padding: "14px", fontSize: 16, fontWeight: 700, borderRadius: 10, cursor: phase === "processing" ? "default" : "pointer" }}
+            onClick={handlePay}
+            disabled={phase === "processing" || !stripe}
+          >
+            {phase === "processing"
+              ? <span style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "center" }}><Loader2 size={18} style={{ animation: "spin 1s linear infinite" }} /> Processing…</span>
+              : `Pay ${fmt(total)}`}
+          </button>
+          <div className="pay-methods" style={{ justifyContent: "center" }}>
+            {["Visa", "Mastercard", "Amex"].map(m => <div key={m} className="pay-method">{m}</div>)}
+          </div>
+          <div style={{ fontSize: 13, color: DS.colors.textMuted, textAlign: "center" }}>Powered by Stripe · PCI DSS Compliant · End-to-end encrypted</div>
         </div>
-      </div>
-      {phase === "waiting" && (
-        <div style={{ fontSize: 13, color: DS.colors.textMuted }}>Powered by Stripe · PCI DSS Compliant · End-to-end encrypted</div>
       )}
     </div>
+  );
+}
+
+function KioskPayment(props) {
+  return (
+    <Elements stripe={stripePromise}>
+      <KioskPaymentInner {...props} />
+    </Elements>
   );
 }
 
@@ -2122,6 +2220,12 @@ function ManagerView({ user }) {
   const [searchQ, setSearchQ] = useState("");
   const [products, setProducts] = useState([]);
   const [loadingProducts, setLoadingProducts] = useState(false);
+  const [venueStock, setVenueStock] = useState([]);
+  const [loadingVenueStock, setLoadingVenueStock] = useState(false);
+  const [editingVenueStock, setEditingVenueStock] = useState({});
+  const [venueStockSearch, setVenueStockSearch] = useState("");
+  const [venueStockStatusFilter, setVenueStockStatusFilter] = useState("all");
+  const [venueStockSort, setVenueStockSort] = useState({ col: "name", dir: "asc" });
   const [overview, setOverview] = useState(null);
   const [loadingOverview, setLoadingOverview] = useState(true);
   const [weeklySales, setWeeklySales] = useState([]);
@@ -2159,6 +2263,7 @@ function ManagerView({ user }) {
   const [pinSaved, setPinSaved] = useState(false);
   const [currentPin, setCurrentPin] = useState("");
   const isOrgAdmin = user?.role === "org_admin";
+  const isAdmin = user?.role === "admin";
   const VENUE_ID = selectedVenueId;
 
   useEffect(() => {
@@ -2167,8 +2272,16 @@ function ManagerView({ user }) {
       supabase.from("venues").select("name").eq("id", selectedVenueId).single()
         .then(({ data }) => { if (data) setVenueName(data.name); });
     }
-    // Load org venues for org_admin
-    if (isOrgAdmin && user?.org_id) {
+    // Load org venues for org_admin, or all venues for platform admin
+    if (isAdmin) {
+      supabase.from("venues").select("id, name, location").order("name")
+        .then(({ data }) => {
+          if (data?.length) {
+            setOrgVenues(data);
+            if (!selectedVenueId) setSelectedVenueId(data[0].id);
+          }
+        });
+    } else if (isOrgAdmin && user?.org_id) {
       supabase.from("venues").select("id, name, location").eq("org_id", user.org_id)
         .then(({ data }) => {
           if (data?.length) {
@@ -2192,7 +2305,7 @@ function ManagerView({ user }) {
 
   useEffect(() => {
     if (!VENUE_ID) return;
-    if (activeSection === "products" || activeSection === "inventory") loadProducts();
+    if (activeSection === "stock") loadVenueStock();
     if (activeSection === "compliance") loadCompliance();
     if (activeSection === "staff") loadStaff();
     if (activeSection === "analytics") loadAnalytics("weekly");
@@ -2566,6 +2679,31 @@ function ManagerView({ user }) {
     setLoadingProducts(false);
   };
 
+  const loadVenueStock = async () => {
+    setLoadingVenueStock(true);
+    const { data } = await supabase
+      .from("inventory")
+      .select("*, products(id, name, category, low_stock_threshold)")
+      .eq("venue_id", VENUE_ID);
+    setVenueStock(data || []);
+    setLoadingVenueStock(false);
+  };
+
+  const saveVenueStockThresholds = async (inv) => {
+    const edit = editingVenueStock[inv.id];
+    if (!edit) return;
+    await Promise.all([
+      edit.min !== undefined && inv.products?.id
+        ? supabase.from("products").update({ low_stock_threshold: Number(edit.min) }).eq("id", inv.products.id)
+        : Promise.resolve(),
+      edit.max !== undefined
+        ? supabase.from("inventory").update({ max_quantity: Number(edit.max) }).eq("id", inv.id)
+        : Promise.resolve(),
+    ]);
+    const s = { ...editingVenueStock }; delete s[inv.id]; setEditingVenueStock(s);
+    loadVenueStock();
+  };
+
   const loadCompliance = async () => {
     const todayStart = new Date(); todayStart.setHours(0,0,0,0);
     const [statsRes, logRes] = await Promise.all([
@@ -2599,8 +2737,7 @@ function ManagerView({ user }) {
   const navItems = [
     { id: "overview",   icon: LayoutDashboard, label: "Overview" },
     { id: "analytics",  icon: TrendingUp,      label: "Analytics" },
-    { id: "products",   icon: Package,         label: "Products" },
-    { id: "inventory",  icon: Warehouse,       label: "Inventory" },
+    { id: "stock",      icon: Warehouse,       label: "Stock" },
     { id: "compliance", icon: Shield,          label: "Compliance" },
     { id: "staff",      icon: Users,           label: "Staff" },
     { id: "export",     icon: Download,        label: "Export" },
@@ -2611,8 +2748,8 @@ function ManagerView({ user }) {
     <div className="manager-layout">
       <div className="sidebar">
         <div style={{ padding: "0 16px 16px", borderBottom: `1px solid ${DS.colors.border}`, marginBottom: 8 }}>
-          <div style={{ fontSize: 11, color: DS.colors.textMuted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>{isOrgAdmin ? "Organisation" : "Venue"}</div>
-          {isOrgAdmin && orgVenues.length > 0 ? (
+          <div style={{ fontSize: 11, color: DS.colors.textMuted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>{isAdmin ? "All Venues" : isOrgAdmin ? "Organisation" : "Venue"}</div>
+          {(isAdmin || isOrgAdmin) && orgVenues.length > 0 ? (
             <select
               value={selectedVenueId || ""}
               onChange={e => setSelectedVenueId(e.target.value)}
@@ -2982,127 +3119,116 @@ function ManagerView({ user }) {
           </>
         )}
 
-        {activeSection === "products" && (
+        {activeSection === "stock" && (
           <>
-            <div>
-              <div className="section-title">PRODUCT CATALOGUE</div>
-              <div className="section-sub">Live from database · {products.length} products</div>
-            </div>
-            <div className="prod-manage">
-              <div className="prod-search-row">
-                <input className="search-input" placeholder="Search products…" value={searchQ} onChange={e => setSearchQ(e.target.value)} />
-                <button className="btn-sm btn-accent">+ Add Product</button>
-              </div>
-              {loadingProducts ? (
-                <div style={{ display: "flex", justifyContent: "center", padding: 40 }}><div className="spinner" /></div>
-              ) : (
-                <div className="chart-card" style={{ padding: 0, overflow: "hidden" }}>
-                  <table className="data-table">
-                    <thead>
-                      <tr><th>Product</th><th>Category</th><th>Price</th><th>Stock</th><th>Alert At</th><th>Status</th><th>Actions</th></tr>
-                    </thead>
-                    <tbody>
-                      {filteredProducts.map(p => (
-                        <tr key={p.id}>
-                          <td style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                            <ProductImage imageUrl={p.image_url} name={p.name} size="row" category={p.category} />
-                            <span>{p.name}<br /><span style={{ fontSize: 11, color: DS.colors.textMuted }}>{p.brand}</span></span>
-                          </td>
-                          <td><span className="tag-pill" style={{ background: "rgba(124,92,191,0.15)", color: DS.colors.purple }}>{(p.category || "").replace("_", " ")}</span></td>
-                          <td style={{ color: DS.colors.accent, fontFamily: DS.font.display, fontSize: 16 }}>{fmt(p.price)}</td>
-                          <td><span style={{ color: isOutOfStock(p) ? DS.colors.danger : isLowStock(p) ? DS.colors.warn : DS.colors.accent }}>{p.stock} units</span></td>
-                          <td><span style={{ fontSize: 12, color: DS.colors.textMuted }}>≤{getLowStockThreshold(p)}{p.low_stock_threshold != null ? <span style={{ color: DS.colors.accent }}> ✎</span> : ""}</span></td>
-                          <td>
-                            <span className="tag-pill" style={p.is_active && p.stock > 0 ? { background: DS.colors.accentGlow, color: DS.colors.accent } : { background: DS.colors.dangerGlow, color: DS.colors.danger }}>
-                              {p.is_active && p.stock > 0 ? "Active" : "Inactive"}
-                            </span>
-                          </td>
-                          <td>
-                            <button className="btn-sm btn-outline" style={{ marginRight: 6 }} onClick={() => setEditingProduct({ ...p, thresholdInput: p.low_stock_threshold != null ? String(p.low_stock_threshold) : "" })}>Edit</button>
-                            <button className="btn-sm" style={{ background: DS.colors.dangerGlow, color: DS.colors.danger, border: `1px solid ${DS.colors.danger}` }}>Hide</button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          </>
-        )}
-
-        {activeSection === "inventory" && (
-          <>
-            <div>
-              <div className="section-title">INVENTORY</div>
-              <div className="section-sub">Stock levels and reorder alerts</div>
-            </div>
-            {loadingProducts ? (
+            <div className="section-title">STOCK</div>
+            <div className="section-sub">Inventory levels for {venueName}</div>
+            {loadingVenueStock ? (
               <div style={{ display: "flex", justifyContent: "center", padding: 40 }}><div className="spinner" /></div>
             ) : (
-              <>
+              <div className="chart-card" style={{ padding: 0, overflow: "hidden" }}>
+                <div style={{ padding: "10px 14px", borderBottom: `1px solid ${DS.colors.border}`, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  {["all", "out", "low", "over", "ok"].map(s => (
+                    <button key={s} className="btn-sm btn-outline" style={{ color: venueStockStatusFilter === s ? DS.colors.accent : DS.colors.textMuted, borderColor: venueStockStatusFilter === s ? DS.colors.accent : DS.colors.border }} onClick={() => setVenueStockStatusFilter(s)}>
+                      {s === "all" ? "All" : s.charAt(0).toUpperCase() + s.slice(1)}
+                    </button>
+                  ))}
+                  <input style={{ background: DS.colors.surface, border: `1px solid ${DS.colors.border}`, borderRadius: 6, padding: "7px 10px", color: DS.colors.text, fontSize: 13, outline: "none", width: 200, flex: "none" }} value={venueStockSearch} onChange={e => setVenueStockSearch(e.target.value)} placeholder="Search product or category…" />
+                </div>
                 {(() => {
-                  const lowStockProducts = products.filter(p => isLowStock(p) || isOutOfStock(p)).sort((a, b) => a.stock - b.stock);
-                  const outOfStockCount = products.filter(p => isOutOfStock(p)).length;
-                  const lowStockCount = products.filter(p => isLowStock(p)).length;
+                  const vsi = (col) => venueStockSort.col === col ? (venueStockSort.dir === "asc" ? " ↑" : " ↓") : "";
+                  const vhs = (col) => setVenueStockSort(s => ({ col, dir: s.col === col && s.dir === "asc" ? "desc" : "asc" }));
+                  const colW = ["25%", "15%", "10%", "10%", "10%", "12%", "18%"];
+                  const filteredVenueStock = venueStock
+                    .filter(inv => {
+                      const q = venueStockSearch.toLowerCase();
+                      if (q && !(inv.products?.name || "").toLowerCase().includes(q) && !(inv.products?.category || "").toLowerCase().includes(q)) return false;
+                      if (venueStockStatusFilter !== "all") {
+                        const t = inv.products?.low_stock_threshold || LOW_STOCK_THRESHOLDS[inv.products?.category] || LOW_STOCK_THRESHOLDS.default;
+                        const qty = inv.quantity || 0;
+                        if (venueStockStatusFilter === "out" && qty !== 0) return false;
+                        if (venueStockStatusFilter === "low" && !(qty > 0 && qty <= t)) return false;
+                        if (venueStockStatusFilter === "over" && !(inv.max_quantity && qty > inv.max_quantity)) return false;
+                        if (venueStockStatusFilter === "ok" && !(qty > t && !(inv.max_quantity && qty > inv.max_quantity))) return false;
+                      }
+                      return true;
+                    })
+                    .sort((a, b) => {
+                      const dir = venueStockSort.dir === "asc" ? 1 : -1;
+                      if (venueStockSort.col === "name") return dir * (a.products?.name || "").localeCompare(b.products?.name || "");
+                      if (venueStockSort.col === "category") return dir * (a.products?.category || "").localeCompare(b.products?.category || "");
+                      if (venueStockSort.col === "stock") return dir * ((a.quantity || 0) - (b.quantity || 0));
+                      if (venueStockSort.col === "min") {
+                        const thresh = inv => inv.products?.low_stock_threshold || LOW_STOCK_THRESHOLDS[inv.products?.category] || LOW_STOCK_THRESHOLDS.default;
+                        return dir * (thresh(a) - thresh(b));
+                      }
+                      if (venueStockSort.col === "max") return dir * ((a.max_quantity || 0) - (b.max_quantity || 0));
+                      if (venueStockSort.col === "status") {
+                        const rank = inv => { const t = inv.products?.low_stock_threshold || LOW_STOCK_THRESHOLDS[inv.products?.category] || LOW_STOCK_THRESHOLDS.default; const q = inv.quantity || 0; return (inv.max_quantity && q > inv.max_quantity) ? 0 : q > t ? 1 : q > 0 ? 2 : 3; };
+                        return dir * (rank(a) - rank(b));
+                      }
+                      return 0;
+                    });
                   return (
                     <>
-                      <div className="stats-row">
-                        <div className="stat-card"><div className="stat-label">Total SKUs</div><div className="stat-value">{products.length}</div></div>
-                        <div className="stat-card">
-                          <div className="stat-label">Low Stock</div>
-                          <div className="stat-value" style={{ color: DS.colors.warn }}>{lowStockCount}</div>
-                          {lowStockCount > 0 && <div className="stat-delta" style={{ color: DS.colors.warn, display: "flex", alignItems: "center", gap: 3 }}><AlertTriangle size={10} /> Reorder needed</div>}
-                        </div>
-                        <div className="stat-card">
-                          <div className="stat-label">Out of Stock</div>
-                          <div className="stat-value" style={{ color: DS.colors.danger }}>{outOfStockCount}</div>
-                          {outOfStockCount > 0 && <div className="stat-delta" style={{ color: DS.colors.danger, display: "flex", alignItems: "center", gap: 3 }}><AlertTriangle size={10} /> Action required</div>}
-                        </div>
-                      </div>
-                      <div className="chart-card">
-                        <div className="chart-title" style={{ display: "flex", alignItems: "center", gap: 6 }}><AlertTriangle size={14} /> Low Stock & Out of Stock Alerts</div>
-                        <div style={{ fontSize: 12, color: DS.colors.textMuted, marginBottom: 12 }}>
-                          Thresholds: E-Liquids ≤5 · Prefilled Pods ≤3 · Refillable Kits ≤2 · Refillable Pods ≤4
-                        </div>
-                        {lowStockProducts.map(p => {
-                          const threshold = getLowStockThreshold(p.category);
-                          const out = isOutOfStock(p);
-                          return (
-                            <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 16, padding: "12px 0", borderBottom: `1px solid ${DS.colors.border}` }}>
-                              <ProductImage imageUrl={p.image_url} name={p.name} size="thumb" category={p.category} />
-                              <div style={{ flex: 1 }}>
-                                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                                  <span style={{ fontWeight: 600 }}>{p.name}</span>
-                                  <span style={{
-                                    fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 4,
-                                    background: out ? DS.colors.dangerGlow : DS.colors.warnGlow,
-                                    color: out ? DS.colors.danger : DS.colors.warn,
-                                  }}>{out ? "OUT OF STOCK" : "LOW STOCK"}</span>
-                                </div>
-                                <div style={{ fontSize: 11, color: DS.colors.textMuted, marginTop: 2 }}>
-                                  {p.category?.replace(/_/g, " ")} · threshold: {threshold} units
-                                  {p.low_stock_threshold != null && <span style={{ color: DS.colors.accent, marginLeft: 6 }}>· custom</span>}
-                                </div>
-                                <div className="stock-bar-wrap" style={{ marginTop: 6 }}>
-                                  <div className="stock-bar-bg" style={{ flex: 1 }}>
-                                    <div className="stock-bar-fill" style={{ width: `${Math.min((p.stock / (threshold * 3)) * 100, 100)}%`, background: out ? DS.colors.danger : DS.colors.warn }} />
-                                  </div>
-                                  <span style={{ fontSize: 12, color: DS.colors.textSub, width: 60 }}>{p.stock} units</span>
-                                </div>
-                              </div>
-                              <button className="btn-sm btn-accent">Reorder</button>
-                            </div>
-                          );
-                        })}
-                        {lowStockProducts.length === 0 && (
-                          <div style={{ textAlign: "center", padding: 40, color: DS.colors.textMuted, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}><CheckCircle2 size={14} /> All stock levels are healthy</div>
-                        )}
+                      <table className="data-table" style={{ tableLayout: "fixed" }}>
+                        <colgroup>{colW.map((w, i) => <col key={i} style={{ width: w }} />)}</colgroup>
+                        <thead><tr>
+                          <th style={{ cursor: "pointer" }} onClick={() => vhs("name")}>Product{vsi("name")}</th>
+                          <th style={{ cursor: "pointer" }} onClick={() => vhs("category")}>Category{vsi("category")}</th>
+                          <th style={{ cursor: "pointer" }} onClick={() => vhs("stock")}>Stock{vsi("stock")}</th>
+                          <th style={{ cursor: "pointer" }} onClick={() => vhs("min")}>Min{vsi("min")}</th>
+                          <th style={{ cursor: "pointer" }} onClick={() => vhs("max")}>Max{vsi("max")}</th>
+                          <th style={{ cursor: "pointer" }} onClick={() => vhs("status")}>Status{vsi("status")}</th>
+                          <th>Actions</th>
+                        </tr></thead>
+                      </table>
+                      <div style={{ maxHeight: 480, overflowY: "auto" }}>
+                        <table className="data-table" style={{ tableLayout: "fixed" }}>
+                          <colgroup>{colW.map((w, i) => <col key={i} style={{ width: w }} />)}</colgroup>
+                          <tbody>
+                            {filteredVenueStock.map(inv => {
+                              const threshold = inv.products?.low_stock_threshold || LOW_STOCK_THRESHOLDS[inv.products?.category] || LOW_STOCK_THRESHOLDS.default;
+                              const qty = inv.quantity || 0;
+                              const maxQ = inv.max_quantity;
+                              const isOut = qty === 0;
+                              const isLow = qty > 0 && qty <= threshold;
+                              const isOver = maxQ && qty > maxQ;
+                              const statusLabel = isOut ? "Out" : isLow ? "Low" : isOver ? "Over" : "OK";
+                              const statusColor = isOut ? DS.colors.danger : isLow ? DS.colors.warn : isOver ? DS.colors.blue : DS.colors.accent;
+                              const editing = editingVenueStock[inv.id];
+                              const inputSty = { background: DS.colors.surface, border: `1px solid ${DS.colors.border}`, borderRadius: 6, padding: "3px 6px", color: DS.colors.text, fontSize: 13, outline: "none" };
+                              return (
+                                <tr key={inv.id}>
+                                  <td style={{ fontWeight: 600 }}>{inv.products?.name || "—"}</td>
+                                  <td><span className="tag-pill" style={{ background: DS.colors.accentGlow, color: DS.colors.accent, fontSize: 10 }}>{inv.products?.category || "—"}</span></td>
+                                  <td style={{ fontFamily: DS.font.mono, fontWeight: 700, color: statusColor }}>{qty}</td>
+                                  <td>{editing ? <input style={{ ...inputSty, width: 60 }} type="number" defaultValue={threshold} onChange={e => setEditingVenueStock(s => ({ ...s, [inv.id]: { ...s[inv.id], min: e.target.value } }))} /> : threshold}</td>
+                                  <td>{editing ? <input style={{ ...inputSty, width: 60 }} type="number" defaultValue={maxQ || ""} placeholder="—" onChange={e => setEditingVenueStock(s => ({ ...s, [inv.id]: { ...s[inv.id], max: e.target.value } }))} /> : (maxQ || "—")}</td>
+                                  <td><span className="tag-pill" style={{ background: statusColor + "22", color: statusColor }}>{statusLabel}</span></td>
+                                  <td>
+                                    <div style={{ display: "flex", gap: 6 }}>
+                                      {editing ? (
+                                        <>
+                                          <button className="btn-sm btn-accent" onClick={() => saveVenueStockThresholds(inv)}>Save</button>
+                                          <button className="btn-sm btn-outline" onClick={() => { const s = { ...editingVenueStock }; delete s[inv.id]; setEditingVenueStock(s); }}>Cancel</button>
+                                        </>
+                                      ) : (
+                                        <button className="btn-sm btn-outline" onClick={() => setEditingVenueStock(s => ({ ...s, [inv.id]: {} }))}>Edit</button>
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                            {filteredVenueStock.length === 0 && <tr><td colSpan={7} style={{ textAlign: "center", color: DS.colors.textMuted, padding: 32 }}>{venueStock.length > 0 ? "No items match filters" : "No inventory records found"}</td></tr>}
+                          </tbody>
+                        </table>
                       </div>
                     </>
                   );
                 })()}
-              </>
+              </div>
             )}
           </>
         )}
@@ -3564,6 +3690,18 @@ function POProductCombobox({ products = [], value, onChange, inputStyle }) {
 function AdminView() {
   const [adminSection, setAdminSection] = useState("venues");
 
+  // Platform Settings
+  const [platformSettings, setPlatformSettings] = useState(null);
+  const [settingsFormData, setSettingsFormData] = useState({});
+  const [editingSettings, setEditingSettings] = useState(false);
+  const [savingSettings, setSavingSettings] = useState(false);
+
+  // Organisations
+  const [orgs, setOrgs] = useState([]);
+  const [orgForm, setOrgForm] = useState(null);
+  const [orgFormData, setOrgFormData] = useState({});
+  const [savingOrg, setSavingOrg] = useState(false);
+
   // Venues
   const [venues, setVenues] = useState([]);
   const [loadingVenues, setLoadingVenues] = useState(false);
@@ -3573,6 +3711,7 @@ function AdminView() {
   const [deletingVenueId, setDeletingVenueId] = useState(null);
   const [venuePSHistory, setVenuePSHistory] = useState({}); // { venueId: [records] }
   const [showingHistoryId, setShowingHistoryId] = useState(null);
+  const [connectingStripeId, setConnectingStripeId] = useState(null);
 
   // Users
   const [users, setUsers] = useState([]);
@@ -3585,7 +3724,11 @@ function AdminView() {
   const [stockVenueId, setStockVenueId] = useState("all");
   const [inventory, setInventory] = useState([]);
   const [loadingInventory, setLoadingInventory] = useState(false);
+  const [calcingThresholds, setCalcingThresholds] = useState(false);
   const [editingStock, setEditingStock] = useState({});
+  const [stockSearch, setStockSearch] = useState("");
+  const [stockStatusFilter, setStockStatusFilter] = useState("all");
+  const [stockSort, setStockSort] = useState({ col: "name", dir: "asc" });
 
   // Purchasing
   const [purchaseOrders, setPurchaseOrders] = useState([]);
@@ -3595,6 +3738,12 @@ function AdminView() {
   const [poFormData, setPOFormData] = useState({ venue_id: "", supplier_email: "", notes: "", items: [] });
   const [poVenueProducts, setPOVenueProducts] = useState([]);
   const [expandedPO, setExpandedPO] = useState(null);
+  const [selectedAlerts, setSelectedAlerts] = useState(new Set());
+  const [poFilterStatus, setPOFilterStatus] = useState("all");
+  const [poFilterVenue, setPOFilterVenue] = useState("all");
+  const [poSearch, setPOSearch] = useState("");
+  const [poSort, setPOSort] = useState({ col: "date", dir: "desc" });
+  const [selectedPOIds, setSelectedPOIds] = useState(new Set());
 
   // Financials
   const [financials, setFinancials] = useState(null);
@@ -3609,11 +3758,12 @@ function AdminView() {
   const [editingBilling, setEditingBilling] = useState(null);
   const [billingFormData, setBillingFormData] = useState({});
 
-  // Load venues on mount (needed for dropdowns everywhere)
-  useEffect(() => { loadVenues(); }, []);
+  // Load venues, orgs and platform settings on mount
+  useEffect(() => { loadVenues(); loadOrgs(); loadPlatformSettings(); }, []);
 
   useEffect(() => {
     if (adminSection === "users") loadUsers();
+    if (adminSection === "organisations") loadOrgs();
     if (adminSection === "stock") loadInventory();
     if (adminSection === "purchasing") loadPurchasing();
     if (adminSection === "financials") loadFinancials();
@@ -3660,19 +3810,26 @@ function AdminView() {
     const newPct = Number(d.jarvid_profit_share_pct) || 20;
     const payload = { name: d.name, location: d.location, jarvid_profit_share_pct: newPct, supplier_email: d.supplier_email || null, subscription_plan: d.subscription_plan || "pro", monthly_fee_pence: Number(d.monthly_fee_pence) || 14900 };
     if (venueForm.mode === "new") {
-      const { data: newVenue, error } = await supabase.from("venues").insert({ ...payload, org_id: d.org_id || null }).select().single();
+      let orgId = d.org_id || null;
+      if (!orgId) {
+        const { data: newOrg } = await supabase.from("organisations").insert({ name: d.name }).select().single();
+        if (newOrg) { orgId = newOrg.id; loadOrgs(); }
+      }
+      const { data: newVenue, error } = await supabase.from("venues").insert({ ...payload, org_id: orgId }).select().single();
       if (!error && newVenue) {
         await supabase.from("venue_profit_share_history").insert({ venue_id: newVenue.id, jarvid_profit_share_pct: newPct, effective_from: d.profit_share_effective_from || new Date().toISOString().slice(0, 10) });
         setVenueForm(null); loadVenues();
       } else alert("Error: " + error?.message);
     } else {
-      const { error } = await supabase.from("venues").update(payload).eq("id", venueForm.id);
-      if (!error) {
+      const { data: updated, error } = await supabase.from("venues").update(payload).eq("id", venueForm.id).select();
+      if (error) { alert("Error: " + error.message); }
+      else if (!updated?.length) { alert("Update was blocked — check database permissions (RLS policy on venues table)."); }
+      else {
         if (newPct !== venueForm.originalPct && d.profit_share_effective_from) {
           await supabase.from("venue_profit_share_history").insert({ venue_id: venueForm.id, jarvid_profit_share_pct: newPct, effective_from: d.profit_share_effective_from });
         }
         setVenueForm(null); loadVenues();
-      } else alert("Error: " + error.message);
+      }
     }
     setSavingVenue(false);
   };
@@ -3683,6 +3840,20 @@ function AdminView() {
     const { error } = await supabase.from("venues").delete().eq("id", id);
     if (!error) loadVenues(); else alert("Error: " + error.message);
     setDeletingVenueId(null);
+  };
+
+  const connectStripe = async (venueId) => {
+    setConnectingStripeId(venueId);
+    try {
+      const { data, error } = await supabase.functions.invoke("stripe-connect-onboard", {
+        body: { venue_id: venueId, return_url: window.location.href },
+      });
+      if (error || !data?.url) throw new Error(error?.message || "Failed to generate onboarding link");
+      window.open(data.url, "_blank");
+    } catch (e) {
+      alert("Stripe Connect error: " + e.message);
+    }
+    setConnectingStripeId(null);
   };
 
   // --- Users ---
@@ -3696,10 +3867,20 @@ function AdminView() {
   const saveUser = async () => {
     setSavingUser(true);
     const d = userFormData;
-    const { error } = userForm.mode === "new"
-      ? await supabase.from("staff_users").insert({ email: d.email, role: d.role || "staff", venue_id: d.venue_id || null, org_id: d.org_id || null, is_active: true })
-      : await supabase.from("staff_users").update({ role: d.role, venue_id: d.venue_id || null, org_id: d.org_id || null }).eq("id", userForm.id);
-    if (!error) { setUserForm(null); loadUsers(); } else alert("Error: " + error.message);
+    const venueId = d.venue_id === "" ? null : (d.venue_id || null);
+    if (userForm.mode === "new") {
+      const { error } = await supabase.from("staff_users").insert({ email: d.email, role: d.role || "staff", venue_id: venueId, org_id: d.org_id || null, is_active: true });
+      if (!error) { setUserForm(null); loadUsers(); } else alert("Error: " + error.message);
+    } else {
+      const { data: updated, error } = await supabase
+        .from("staff_users")
+        .update({ role: d.role, venue_id: venueId, org_id: d.org_id || null })
+        .eq("id", userForm.id)
+        .select();
+      if (error) { alert("Error: " + error.message); }
+      else if (!updated?.length) { alert("Update was blocked — check database permissions (RLS policy may be preventing this change)."); }
+      else { setUserForm(null); loadUsers(); }
+    }
     setSavingUser(false);
   };
 
@@ -3739,6 +3920,50 @@ function AdminView() {
     loadInventory();
   };
 
+  const autoCalcStockThresholds = async () => {
+    setCalcingThresholds(true);
+    const LEAD = 2;
+    const TIERS = [
+      { minRate: 1,   maxDays: LEAD * 2,  reorderDays: LEAD },
+      { minRate: 0.2, maxDays: LEAD * 7,  reorderDays: LEAD * 3 },
+      { minRate: 0,   maxDays: LEAD * 14, reorderDays: LEAD * 7 },
+    ];
+
+    // 1. Fetch last 30 days of completed sales
+    const since = new Date();
+    since.setDate(since.getDate() - 30);
+    const { data: salesData } = await supabase
+      .from("order_items")
+      .select("product_id, quantity, orders!inner(venue_id, status, created_at)")
+      .eq("orders.status", "completed")
+      .gte("orders.created_at", since.toISOString());
+
+    // 2. Aggregate total sold per product+venue
+    const salesMap = {};
+    for (const item of salesData || []) {
+      const key = `${item.product_id}:${item.orders.venue_id}`;
+      salesMap[key] = (salesMap[key] || 0) + item.quantity;
+    }
+
+    // 3. Compute suggestions for each inventory row in current state
+    await Promise.all(inventory.flatMap(inv => {
+      const key = `${inv.products?.id}:${inv.venue_id}`;
+      const avgDaily = (salesMap[key] || 0) / 30;
+      const tier = TIERS.find(t => avgDaily >= t.minRate) || TIERS[2];
+      const suggestedMax = Math.max(avgDaily === 0 ? 2 : 1, Math.ceil(avgDaily * tier.maxDays));
+      const suggestedMin = Math.max(1, Math.ceil(avgDaily * tier.reorderDays));
+      return [
+        supabase.from("inventory").update({ max_quantity: suggestedMax }).eq("id", inv.id),
+        inv.products?.id
+          ? supabase.from("products").update({ low_stock_threshold: suggestedMin }).eq("id", inv.products.id)
+          : Promise.resolve(),
+      ];
+    }));
+
+    setCalcingThresholds(false);
+    loadInventory();
+  };
+
   const flagForReorder = async (inv) => {
     const venueId = inv.venue_id || stockVenueId;
     const { data: venue } = await supabase.from("venues").select("supplier_email").eq("id", venueId).single();
@@ -3747,7 +3972,7 @@ function AdminView() {
       const threshold = inv.products?.low_stock_threshold || LOW_STOCK_THRESHOLDS.default;
       const qty = inv.max_quantity ? Math.max(0, inv.max_quantity - (inv.quantity || 0)) : threshold * 3;
       await supabase.from("purchase_order_items").insert({ po_id: po.id, product_id: inv.products?.id, quantity_ordered: qty });
-      alert(`Draft PO created for ${inv.products?.name}`);
+      loadPurchasing();
     }
   };
 
@@ -3756,7 +3981,7 @@ function AdminView() {
     setLoadingPOs(true);
     const [{ data: pos }, { data: alerts }] = await Promise.all([
       supabase.from("purchase_orders").select("*, venues(name, supplier_email), purchase_order_items(*, products(name))").order("created_at", { ascending: false }),
-      supabase.from("inventory").select("*, products(id, name, low_stock_threshold), venues(name)").order("quantity"),
+      supabase.from("inventory").select("*, products(id, name, low_stock_threshold), venues(name, supplier_email)").order("quantity"),
     ]);
     setPurchaseOrders(pos || []);
     setReorderAlerts((alerts || []).filter(inv => (inv.quantity || 0) <= (inv.products?.low_stock_threshold || LOW_STOCK_THRESHOLDS.default)));
@@ -3769,17 +3994,24 @@ function AdminView() {
     setPOVenueProducts(data || []);
   };
 
+  const sendPOEmail = (email, items) => {
+    const body = items.map(it => `- ${it.name}: ${it.qty}`).join("\n");
+    window.open(`mailto:${email}?subject=${encodeURIComponent("Purchase Order — " + new Date().toLocaleDateString("en-GB"))}&body=${encodeURIComponent(body)}`);
+  };
+
+  const resetPOForm = () => {
+    setPOForm(false);
+    setPOFormData({ venue_id: "", supplier_email: "", notes: "", items: [], _editingId: null });
+  };
+
   const createPO = async (sendImmediately) => {
     const d = poFormData;
     if (!d.venue_id || !d.items?.length) { alert("Select a venue and add at least one item"); return; }
     const { data: po, error } = await supabase.from("purchase_orders").insert({ venue_id: d.venue_id, status: sendImmediately ? "sent" : "draft", supplier_email: d.supplier_email || null, notes: d.notes || null }).select().single();
     if (error) { alert("Error: " + error.message); return; }
-    await supabase.from("purchase_order_items").insert(d.items.map(it => ({ po_id: po.id, product_id: it.product_id || null, quantity_ordered: it.qty })));
-    if (sendImmediately) {
-      const body = d.items.map(it => `- ${it.name}: ${it.qty}`).join("\n");
-      window.open(`mailto:${d.supplier_email}?subject=${encodeURIComponent("Purchase Order — " + new Date().toLocaleDateString("en-GB"))}&body=${encodeURIComponent(body)}`);
-    }
-    setPOForm(false); setPOFormData({ venue_id: "", supplier_email: "", notes: "", items: [] });
+    await supabase.from("purchase_order_items").insert(d.items.map(it => ({ po_id: po.id, product_id: it.product_id || null, quantity_ordered: it.qty, unit_cost: it.unit_cost ? Number(it.unit_cost) : null })));
+    if (sendImmediately) sendPOEmail(d.supplier_email, d.items);
+    resetPOForm();
     loadPurchasing();
   };
 
@@ -3792,6 +4024,122 @@ function AdminView() {
       if (existing) await supabase.from("inventory").update({ quantity: (existing.quantity || 0) + item.quantity_ordered }).eq("id", existing.id);
     }
     loadPurchasing();
+  };
+
+  const startEditPO = async (po) => {
+    await loadPOVenueProducts(po.venue_id);
+    setPOFormData({
+      venue_id: po.venue_id,
+      supplier_email: po.supplier_email || po.venues?.supplier_email || "",
+      notes: po.notes || "",
+      items: (po.purchase_order_items || []).map(it => ({
+        product_id: it.product_id || null,
+        name: it.products?.name || "",
+        qty: it.quantity_ordered,
+        unit_cost: it.unit_cost != null ? String(it.unit_cost) : "",
+        _key: crypto.randomUUID(),
+      })),
+      _editingId: po.id,
+    });
+    setPOForm(true);
+  };
+
+  const updatePO = async (sendImmediately) => {
+    const d = poFormData;
+    if (!d.items?.length) { alert("Add at least one item"); return; }
+    const { error } = await supabase.from("purchase_orders").update({ supplier_email: d.supplier_email || null, notes: d.notes || null, status: sendImmediately ? "sent" : "draft" }).eq("id", d._editingId);
+    if (error) { alert("Error: " + error.message); return; }
+    await supabase.from("purchase_order_items").delete().eq("po_id", d._editingId);
+    await supabase.from("purchase_order_items").insert(d.items.map(it => ({ po_id: d._editingId, product_id: it.product_id || null, quantity_ordered: it.qty, unit_cost: it.unit_cost ? Number(it.unit_cost) : null })));
+    if (sendImmediately) sendPOEmail(d.supplier_email, d.items);
+    resetPOForm();
+    loadPurchasing();
+  };
+
+  const deletePO = async (poId) => {
+    if (!window.confirm("Delete this draft PO? This cannot be undone.")) return;
+    await supabase.from("purchase_order_items").delete().eq("po_id", poId);
+    await supabase.from("purchase_orders").delete().eq("id", poId);
+    loadPurchasing();
+  };
+
+  const handleSavePO = (send) => poFormData._editingId ? updatePO(send) : createPO(send);
+
+  const createVenueReorderPO = async (venueId) => {
+    const items = reorderAlerts.filter(inv => inv.venue_id === venueId);
+    if (!items.length) return;
+    const venue = items[0].venues;
+    const { data: po, error } = await supabase.from("purchase_orders").insert({
+      venue_id: venueId, status: "draft",
+      supplier_email: venue?.supplier_email || null,
+      notes: `Consolidated reorder — ${items.length} item${items.length !== 1 ? "s" : ""}`,
+    }).select().single();
+    if (error) { alert("Error: " + error.message); return; }
+    await supabase.from("purchase_order_items").insert(items.map(inv => {
+      const threshold = inv.products?.low_stock_threshold || LOW_STOCK_THRESHOLDS.default;
+      const suggested = inv.max_quantity ? Math.max(0, inv.max_quantity - (inv.quantity || 0)) : threshold * 3;
+      return { po_id: po.id, product_id: inv.products?.id || null, quantity_ordered: suggested };
+    }));
+    loadPurchasing();
+  };
+
+  const createBulkReorderPOs = async () => {
+    const selected = reorderAlerts.filter(inv => selectedAlerts.has(inv.id));
+    if (!selected.length) return;
+    const byVenue = {};
+    selected.forEach(inv => {
+      if (!byVenue[inv.venue_id]) byVenue[inv.venue_id] = [];
+      byVenue[inv.venue_id].push(inv);
+    });
+    await Promise.all(Object.entries(byVenue).map(async ([venueId, items]) => {
+      const venue = items[0].venues;
+      const { data: po, error } = await supabase.from("purchase_orders").insert({ venue_id: venueId, status: "draft", supplier_email: venue?.supplier_email || null, notes: "Bulk reorder" }).select().single();
+      if (error) return;
+      await supabase.from("purchase_order_items").insert(items.map(inv => {
+        const threshold = inv.products?.low_stock_threshold || LOW_STOCK_THRESHOLDS.default;
+        const suggested = inv.max_quantity ? Math.max(0, inv.max_quantity - (inv.quantity || 0)) : threshold * 3;
+        return { po_id: po.id, product_id: inv.products?.id || null, quantity_ordered: suggested };
+      }));
+    }));
+    setSelectedAlerts(new Set());
+    loadPurchasing();
+  };
+
+  const mergePOs = async () => {
+    const selected = purchaseOrders.filter(po => selectedPOIds.has(po.id) && po.status === "draft");
+    if (selected.length < 2) { alert("Select at least 2 draft POs to merge"); return; }
+    const venueIds = [...new Set(selected.map(po => po.venue_id))];
+    if (venueIds.length > 1) { alert("Can only merge POs from the same venue"); return; }
+    const sorted = [...selected].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+    const target = sorted[0];
+    const others = sorted.slice(1);
+    const allItems = selected.flatMap(po => po.purchase_order_items || []);
+    const merged = [];
+    const seen = {};
+    for (const it of allItems) {
+      if (it.product_id) {
+        if (seen[it.product_id]) {
+          seen[it.product_id].quantity_ordered += it.quantity_ordered;
+        } else {
+          const entry = { product_id: it.product_id, quantity_ordered: it.quantity_ordered, unit_cost: it.unit_cost };
+          seen[it.product_id] = entry;
+          merged.push(entry);
+        }
+      } else {
+        merged.push({ product_id: null, quantity_ordered: it.quantity_ordered, unit_cost: it.unit_cost });
+      }
+    }
+    await supabase.from("purchase_order_items").delete().in("po_id", selected.map(po => po.id));
+    await supabase.from("purchase_order_items").insert(merged.map(it => ({ po_id: target.id, ...it })));
+    await supabase.from("purchase_orders").delete().in("id", others.map(po => po.id));
+    setSelectedPOIds(new Set());
+    loadPurchasing();
+  };
+
+  const poTotal = (po) => {
+    const items = po.purchase_order_items || [];
+    if (items.every(it => it.unit_cost == null)) return null;
+    return items.reduce((sum, it) => sum + ((it.unit_cost || 0) * (it.quantity_ordered || 0)), 0);
   };
 
   // --- Financials ---
@@ -3850,12 +4198,75 @@ function AdminView() {
   };
 
   const saveBilling = async (id) => {
-    const { error } = await supabase.from("venues").update({ subscription_plan: billingFormData.subscription_plan, monthly_fee_pence: Number(billingFormData.monthly_fee_pence), billing_status: billingFormData.billing_status }).eq("id", id);
-    if (!error) { setEditingBilling(null); loadBilling(); } else alert("Error: " + error.message);
+    const { data: updated, error } = await supabase.from("venues").update({ subscription_plan: billingFormData.subscription_plan, monthly_fee_pence: Number(billingFormData.monthly_fee_pence), billing_status: billingFormData.billing_status }).eq("id", id).select();
+    if (error) { alert("Error: " + error.message); }
+    else if (!updated?.length) { alert("Update was blocked — check database permissions (RLS policy on venues table)."); }
+    else { setEditingBilling(null); loadBilling(); }
+  };
+
+  const loadPlatformSettings = async () => {
+    const { data } = await supabase.from("platform_settings").select("*").eq("id", 1).single();
+    if (data) setPlatformSettings(data);
+  };
+
+  const savePlatformSettings = async () => {
+    setSavingSettings(true);
+    const d = settingsFormData;
+    const payload = {
+      default_jarvid_pct: Number(d.default_jarvid_pct) || 20,
+      default_subscription_plan: d.default_subscription_plan || "pro",
+      default_monthly_fee_pence: Number(d.default_monthly_fee_pence) || 14900,
+      low_stock_eliquid: Number(d.low_stock_eliquid) || 5,
+      low_stock_prefilled_pod: Number(d.low_stock_prefilled_pod) || 3,
+      low_stock_refillable_kit: Number(d.low_stock_refillable_kit) || 2,
+      low_stock_refillable_pods: Number(d.low_stock_refillable_pods) || 4,
+      low_stock_default: Number(d.low_stock_default) || 5,
+    };
+    const { data: updated, error } = await supabase.from("platform_settings").update(payload).eq("id", 1).select();
+    if (error) { alert("Error: " + error.message); }
+    else if (!updated?.length) { alert("Update was blocked — check RLS policy on platform_settings table."); }
+    else { setPlatformSettings(updated[0]); setEditingSettings(false); }
+    setSavingSettings(false);
+  };
+
+  const loadOrgs = async () => {
+    const { data } = await supabase
+      .from("organisations")
+      .select("*, venues(id, name, location)")
+      .order("name");
+    setOrgs(data || []);
+  };
+
+  const saveOrg = async () => {
+    setSavingOrg(true);
+    const d = orgFormData;
+    if (orgForm.mode === "new") {
+      const { error } = await supabase.from("organisations").insert({ name: d.name });
+      if (!error) { setOrgForm(null); loadOrgs(); } else alert("Error: " + error.message);
+    } else {
+      const { data: updated, error } = await supabase.from("organisations").update({ name: d.name }).eq("id", orgForm.id).select();
+      if (error) { alert("Error: " + error.message); }
+      else if (!updated?.length) { alert("Update was blocked — check database permissions (RLS policy on organisations table)."); }
+      else { setOrgForm(null); loadOrgs(); }
+    }
+    setSavingOrg(false);
+  };
+
+  const deleteOrg = async (id) => {
+    if (!window.confirm("Delete this organisation? Venues will be unlinked but not deleted.")) return;
+    await supabase.from("venues").update({ org_id: null }).eq("org_id", id);
+    await supabase.from("organisations").delete().eq("id", id);
+    loadOrgs(); loadVenues();
+  };
+
+  const assignVenueToOrg = async (venueId, orgId) => {
+    await supabase.from("venues").update({ org_id: orgId || null }).eq("id", venueId);
+    loadOrgs(); loadVenues();
   };
 
   const navItems = [
-    { id: "venues",     icon: Building2,      label: "Venues" },
+    { id: "venues",        icon: Building2,      label: "Venues" },
+    { id: "organisations", icon: Network,        label: "Organisations" },
     { id: "users",      icon: Users,          label: "Users" },
     { id: "stock",      icon: Package,        label: "Stock" },
     { id: "purchasing", icon: ShoppingCart,   label: "Purchasing" },
@@ -3894,7 +4305,7 @@ function AdminView() {
                 <div className="section-title">ALL VENUES</div>
                 <div className="section-sub">Network-wide overview · {venues.length} venues</div>
               </div>
-              <button className="btn-sm btn-accent" onClick={() => { setVenueForm({ mode: "new" }); setVenueFormData({ subscription_plan: "pro", monthly_fee_pence: 14900, jarvid_profit_share_pct: 20 }); }}>+ New Venue</button>
+              <button className="btn-sm btn-accent" onClick={() => { setVenueForm({ mode: "new" }); setVenueFormData({ subscription_plan: platformSettings?.default_subscription_plan || "pro", monthly_fee_pence: platformSettings?.default_monthly_fee_pence || 14900, jarvid_profit_share_pct: platformSettings?.default_jarvid_pct || 20 }); }}>+ New Venue</button>
             </div>
 
             {venueForm && (
@@ -3903,10 +4314,13 @@ function AdminView() {
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                   <div style={fieldStyle}><div style={labelStyle}>Name *</div><input style={inputStyle} value={venueFormData.name || ""} onChange={e => setVenueFormData(d => ({ ...d, name: e.target.value }))} placeholder="The Crown Pub" /></div>
                   <div style={fieldStyle}><div style={labelStyle}>Location</div><input style={inputStyle} value={venueFormData.location || ""} onChange={e => setVenueFormData(d => ({ ...d, location: e.target.value }))} placeholder="Manchester" /></div>
-                  {venueForm.mode === "new" && <div style={fieldStyle}><div style={labelStyle}>Org ID (UUID)</div><input style={inputStyle} value={venueFormData.org_id || ""} onChange={e => setVenueFormData(d => ({ ...d, org_id: e.target.value }))} placeholder="optional" /></div>}
+                  <div style={fieldStyle}><div style={labelStyle}>Organisation</div><select style={inputStyle} value={venueFormData.org_id || ""} onChange={e => setVenueFormData(d => ({ ...d, org_id: e.target.value }))}><option value="">— Auto-create from venue name —</option>{orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}</select></div>
                   <div style={fieldStyle}>
-                    <div style={labelStyle}>Profit Share %</div>
+                    <div style={labelStyle}>JarvID Cut %</div>
                     <input style={inputStyle} type="number" value={venueFormData.jarvid_profit_share_pct ?? 20} onChange={e => setVenueFormData(d => ({ ...d, jarvid_profit_share_pct: e.target.value }))} />
+                    <div style={{ fontSize: 11, color: DS.colors.textMuted }}>
+                      JarvID keeps {venueFormData.jarvid_profit_share_pct ?? 20}% · venue keeps {100 - (venueFormData.jarvid_profit_share_pct ?? 20)}%
+                    </div>
                   </div>
                   {venueForm.mode === "new" && (
                     <div style={fieldStyle}>
@@ -3919,7 +4333,7 @@ function AdminView() {
                     <div style={{ ...fieldStyle, gridColumn: "span 2", background: DS.colors.warnGlow, border: `1px solid ${DS.colors.warn}44`, borderRadius: 8, padding: 12 }}>
                       <div style={labelStyle}>New Rate Effective From *</div>
                       <input style={inputStyle} type="date" value={venueFormData.profit_share_effective_from || ""} onChange={e => setVenueFormData(d => ({ ...d, profit_share_effective_from: e.target.value }))} />
-                      <div style={{ fontSize: 11, color: DS.colors.warn }}>Financials before this date will use the previous rate ({venueForm.originalPct}%)</div>
+                      <div style={{ fontSize: 11, color: DS.colors.warn }}>Financials before this date will use the previous rate (JarvID {venueForm.originalPct}% / venue {100 - venueForm.originalPct}%)</div>
                     </div>
                   )}
                   <div style={fieldStyle}><div style={labelStyle}>Supplier Email</div><input style={inputStyle} type="email" value={venueFormData.supplier_email || ""} onChange={e => setVenueFormData(d => ({ ...d, supplier_email: e.target.value }))} placeholder="supplier@company.com" /></div>
@@ -3978,6 +4392,23 @@ function AdminView() {
                         }}>Save</button>
                       </div>
                     </div>
+                    <div style={{ marginBottom: 4 }}>
+                      {v.stripe_account_id ? (
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#22c55e" }}>
+                          <Check size={13} /> Stripe connected
+                          <span style={{ color: DS.colors.textMuted, fontSize: 11, marginLeft: 4 }}>{v.stripe_account_id.slice(0, 16)}…</span>
+                        </div>
+                      ) : (
+                        <button
+                          className="btn-sm btn-outline"
+                          style={{ width: "100%", color: DS.colors.accent, borderColor: DS.colors.accent }}
+                          onClick={() => connectStripe(v.id)}
+                          disabled={connectingStripeId === v.id}
+                        >
+                          {connectingStripeId === v.id ? "Opening Stripe…" : "Connect Stripe"}
+                        </button>
+                      )}
+                    </div>
                     <div style={{ display: "flex", gap: 8 }}>
                       <button className="btn-sm btn-outline" style={{ flex: 1 }} onClick={() => { setVenueForm({ mode: "edit", id: v.id, originalPct: v.jarvid_profit_share_pct || 20 }); setVenueFormData({ name: v.name, location: v.location, jarvid_profit_share_pct: v.jarvid_profit_share_pct || 20, supplier_email: v.supplier_email || "", subscription_plan: v.subscription_plan || "pro", monthly_fee_pence: v.monthly_fee_pence || 14900 }); }}>Edit</button>
                       <button className="btn-sm btn-outline" style={{ flex: 1 }} onClick={() => setShowingHistoryId(showingHistoryId === v.id ? null : v.id)}>History</button>
@@ -3998,7 +4429,7 @@ function AdminView() {
                             return (
                               <div key={h.id || idx} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5px 0", borderBottom: idx < arr.length - 1 ? `1px solid ${DS.colors.border}` : "none" }}>
                                 <div>
-                                  <span style={{ fontSize: 15, fontWeight: 700, fontFamily: DS.font.display, color: isCurrent ? DS.colors.accent : DS.colors.text }}>{h.jarvid_profit_share_pct}%</span>
+                                  <span style={{ fontSize: 15, fontWeight: 700, fontFamily: DS.font.display, color: isCurrent ? DS.colors.accent : DS.colors.text }}>JarvID {h.jarvid_profit_share_pct}% / venue {100 - h.jarvid_profit_share_pct}%</span>
                                   {isCurrent && <span className="tag-pill" style={{ background: DS.colors.accentGlow, color: DS.colors.accent, fontSize: 10, marginLeft: 6 }}>current</span>}
                                 </div>
                                 <div style={{ fontSize: 11, color: DS.colors.textMuted, textAlign: "right" }}>
@@ -4035,8 +4466,8 @@ function AdminView() {
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                   {userForm.mode === "new" && <div style={fieldStyle}><div style={labelStyle}>Email *</div><input style={inputStyle} type="email" value={userFormData.email || ""} onChange={e => setUserFormData(d => ({ ...d, email: e.target.value }))} placeholder="staff@venue.com" /></div>}
                   <div style={fieldStyle}><div style={labelStyle}>Role</div><select style={inputStyle} value={userFormData.role || "staff"} onChange={e => setUserFormData(d => ({ ...d, role: e.target.value }))}><option value="staff">Staff</option><option value="manager">Manager</option><option value="org_admin">Org Admin</option><option value="admin">Admin</option></select></div>
-                  <div style={fieldStyle}><div style={labelStyle}>Venue</div><select style={inputStyle} value={userFormData.venue_id || ""} onChange={e => setUserFormData(d => ({ ...d, venue_id: e.target.value }))}><option value="">— None —</option>{venues.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}</select></div>
-                  <div style={fieldStyle}><div style={labelStyle}>Org ID (UUID)</div><input style={inputStyle} value={userFormData.org_id || ""} onChange={e => setUserFormData(d => ({ ...d, org_id: e.target.value }))} placeholder="optional" /></div>
+                  <div style={fieldStyle}><div style={labelStyle}>Venue</div><select style={inputStyle} value={userFormData.venue_id || ""} onChange={e => { const v = venues.find(v => v.id === e.target.value); setUserFormData(d => ({ ...d, venue_id: e.target.value, org_id: v?.org_id || d.org_id || "" })); }}><option value="">— None —</option>{venues.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}</select></div>
+                  <div style={fieldStyle}><div style={labelStyle}>Organisation</div><select style={inputStyle} value={userFormData.org_id || ""} onChange={e => setUserFormData(d => ({ ...d, org_id: e.target.value }))}><option value="">— None —</option>{orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}</select></div>
                 </div>
                 <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
                   <button className="btn-sm btn-accent" onClick={saveUser} disabled={savingUser}>{savingUser ? "Saving…" : "Save"}</button>
@@ -4075,64 +4506,215 @@ function AdminView() {
           </>
         )}
 
+        {/* ===== ORGANISATIONS ===== */}
+        {adminSection === "organisations" && (
+          <>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div><div className="section-title">ORGANISATIONS</div><div className="section-sub">Group venues under a shared organisation</div></div>
+              <button className="btn-sm btn-accent" onClick={() => { setOrgForm({ mode: "new" }); setOrgFormData({}); }}>+ New Organisation</button>
+            </div>
+
+            {orgForm && (
+              <div style={{ background: DS.colors.card, border: `1px solid ${DS.colors.border}`, borderRadius: 10, padding: 20 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>{orgForm.mode === "new" ? "New Organisation" : "Edit Organisation"}</div>
+                <div style={{ display: "flex", gap: 12, alignItems: "flex-end" }}>
+                  <div style={{ ...fieldStyle, flex: 1 }}>
+                    <div style={labelStyle}>Name *</div>
+                    <input style={inputStyle} value={orgFormData.name || ""} onChange={e => setOrgFormData(d => ({ ...d, name: e.target.value }))} placeholder="The Crown" />
+                  </div>
+                  <button className="btn-sm btn-accent" onClick={saveOrg} disabled={savingOrg}>{savingOrg ? "Saving…" : "Save"}</button>
+                  <button className="btn-sm btn-outline" onClick={() => setOrgForm(null)}>Cancel</button>
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {orgs.map(org => {
+                const orgVenues = org.venues || [];
+                const unassignedVenues = venues.filter(v => !v.org_id || v.org_id === org.id);
+                return (
+                  <div key={org.id} className="chart-card" style={{ padding: 0, overflow: "hidden" }}>
+                    <div style={{ padding: "12px 16px", borderBottom: `1px solid ${DS.colors.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div>
+                        <span style={{ fontWeight: 700, fontSize: 14 }}>{org.name}</span>
+                        <span style={{ fontSize: 12, color: DS.colors.textMuted, marginLeft: 10 }}>{orgVenues.length} venue{orgVenues.length !== 1 ? "s" : ""}</span>
+                      </div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button className="btn-sm btn-outline" onClick={() => { setOrgForm({ mode: "edit", id: org.id }); setOrgFormData({ name: org.name }); }}>Rename</button>
+                        <button className="btn-sm btn-outline" style={{ color: DS.colors.danger, borderColor: DS.colors.danger }} onClick={() => deleteOrg(org.id)}>Delete</button>
+                      </div>
+                    </div>
+                    <div style={{ padding: "10px 16px" }}>
+                      {orgVenues.length > 0 ? (
+                        <table className="data-table" style={{ marginBottom: orgVenues.length ? 10 : 0 }}>
+                          <thead><tr><th>Venue</th><th>Location</th><th style={{ width: 80 }}></th></tr></thead>
+                          <tbody>
+                            {orgVenues.map(v => (
+                              <tr key={v.id}>
+                                <td style={{ fontWeight: 600 }}>{v.name}</td>
+                                <td style={{ color: DS.colors.textSub }}>{v.location || "—"}</td>
+                                <td><button className="btn-sm btn-outline" style={{ color: DS.colors.warn, borderColor: DS.colors.warn }} onClick={() => assignVenueToOrg(v.id, null)}>Remove</button></td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      ) : (
+                        <div style={{ fontSize: 12, color: DS.colors.textMuted, marginBottom: 10 }}>No venues assigned</div>
+                      )}
+                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        <select
+                          style={{ ...inputStyle, width: "auto", minWidth: 220 }}
+                          defaultValue=""
+                          onChange={e => { if (e.target.value) { assignVenueToOrg(e.target.value, org.id); e.target.value = ""; } }}
+                        >
+                          <option value="">+ Add venue to this org…</option>
+                          {venues.filter(v => v.org_id !== org.id).map(v => (
+                            <option key={v.id} value={v.id}>{v.name}{v.org_id ? " (reassign)" : ""}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              {orgs.length === 0 && <div style={{ textAlign: "center", padding: 40, color: DS.colors.textMuted }}>No organisations yet</div>}
+            </div>
+          </>
+        )}
+
         {/* ===== STOCK ===== */}
         {adminSection === "stock" && (
           <>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
               <div><div className="section-title">STOCK</div><div className="section-sub">Inventory levels across all venues</div></div>
-              <select style={{ ...inputStyle, width: "auto", minWidth: 180 }} value={stockVenueId} onChange={e => setStockVenueId(e.target.value)}>
-                <option value="all">All Venues</option>
-                {venues.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
-              </select>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <button
+                  className="btn-sm btn-outline"
+                  style={{ color: DS.colors.accent, borderColor: DS.colors.accent }}
+                  onClick={autoCalcStockThresholds}
+                  disabled={calcingThresholds}
+                >
+                  {calcingThresholds ? "Calculating…" : "Auto-calc Thresholds"}
+                </button>
+                <select style={{ ...inputStyle, width: "auto", minWidth: 180 }} value={stockVenueId} onChange={e => setStockVenueId(e.target.value)}>
+                  <option value="all">All Venues</option>
+                  {venues.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                </select>
+              </div>
             </div>
 
             {loadingInventory ? (
               <div style={{ display: "flex", justifyContent: "center", padding: 40 }}><div className="spinner" /></div>
             ) : (
               <div className="chart-card" style={{ padding: 0, overflow: "hidden" }}>
-                <table className="data-table">
-                  <thead><tr><th>Product</th><th>Category</th><th>Venue</th><th>Stock</th><th>Min</th><th>Max</th><th>Status</th><th>Actions</th></tr></thead>
-                  <tbody>
-                    {inventory.map(inv => {
+                <div style={{ padding: "10px 14px", borderBottom: `1px solid ${DS.colors.border}`, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  {["all", "out", "low", "over", "ok"].map(s => (
+                    <button key={s} className="btn-sm btn-outline" style={{ color: stockStatusFilter === s ? DS.colors.accent : DS.colors.textMuted, borderColor: stockStatusFilter === s ? DS.colors.accent : DS.colors.border }} onClick={() => setStockStatusFilter(s)}>
+                      {s === "all" ? "All" : s.charAt(0).toUpperCase() + s.slice(1)}
+                    </button>
+                  ))}
+                  <input style={{ ...inputStyle, width: 200, flex: "none" }} value={stockSearch} onChange={e => setStockSearch(e.target.value)} placeholder="Search product or category…" />
+                </div>
+                {(() => {
+                  const sq = stockSearch.trim().toLowerCase();
+                  const filteredInventory = inventory
+                    .filter(inv => {
+                      if (!sq) return true;
+                      return (inv.products?.name || "").toLowerCase().includes(sq) || (inv.products?.category || "").toLowerCase().includes(sq);
+                    })
+                    .filter(inv => {
+                      if (stockStatusFilter === "all") return true;
                       const threshold = inv.products?.low_stock_threshold || LOW_STOCK_THRESHOLDS[inv.products?.category] || LOW_STOCK_THRESHOLDS.default;
                       const qty = inv.quantity || 0;
-                      const maxQ = inv.max_quantity;
-                      const isOut = qty === 0;
-                      const isLow = qty > 0 && qty <= threshold;
-                      const isOver = maxQ && qty > maxQ;
-                      const statusLabel = isOut ? "Out" : isLow ? "Low" : isOver ? "Over" : "OK";
-                      const statusColor = isOut ? DS.colors.danger : isLow ? DS.colors.warn : isOver ? DS.colors.blue : DS.colors.accent;
-                      const editing = editingStock[inv.id];
-                      return (
-                        <tr key={inv.id}>
-                          <td style={{ fontWeight: 600 }}>{inv.products?.name || "—"}</td>
-                          <td><span className="tag-pill" style={{ background: DS.colors.accentGlow, color: DS.colors.accent, fontSize: 10 }}>{inv.products?.category || "—"}</span></td>
-                          <td style={{ color: DS.colors.textSub, fontSize: 12 }}>{inv.venues?.name || "—"}</td>
-                          <td style={{ fontFamily: DS.font.mono, fontWeight: 700, color: statusColor }}>{qty}</td>
-                          <td>{editing ? <input style={{ ...inputStyle, width: 60, padding: "3px 6px" }} type="number" defaultValue={threshold} onChange={e => setEditingStock(s => ({ ...s, [inv.id]: { ...s[inv.id], min: e.target.value } }))} /> : threshold}</td>
-                          <td>{editing ? <input style={{ ...inputStyle, width: 60, padding: "3px 6px" }} type="number" defaultValue={maxQ || ""} placeholder="—" onChange={e => setEditingStock(s => ({ ...s, [inv.id]: { ...s[inv.id], max: e.target.value } }))} /> : (maxQ || "—")}</td>
-                          <td><span className="tag-pill" style={{ background: statusColor + "22", color: statusColor }}>{statusLabel}</span></td>
-                          <td>
-                            <div style={{ display: "flex", gap: 6 }}>
-                              {editing ? (
-                                <>
-                                  <button className="btn-sm btn-accent" onClick={() => saveStockThresholds(inv)}>Save</button>
-                                  <button className="btn-sm btn-outline" onClick={() => { const s = { ...editingStock }; delete s[inv.id]; setEditingStock(s); }}>Cancel</button>
-                                </>
-                              ) : (
-                                <>
-                                  <button className="btn-sm btn-outline" onClick={() => setEditingStock(s => ({ ...s, [inv.id]: {} }))}>Edit</button>
-                                  <button className="btn-sm btn-outline" style={{ color: DS.colors.warn, borderColor: DS.colors.warn }} onClick={() => flagForReorder(inv)}>Flag</button>
-                                </>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                    {inventory.length === 0 && <tr><td colSpan={8} style={{ textAlign: "center", color: DS.colors.textMuted, padding: 32 }}>No inventory records found</td></tr>}
-                  </tbody>
-                </table>
+                      if (stockStatusFilter === "out") return qty === 0;
+                      if (stockStatusFilter === "low") return qty > 0 && qty <= threshold;
+                      if (stockStatusFilter === "over") return inv.max_quantity && qty > inv.max_quantity;
+                      if (stockStatusFilter === "ok") return qty > threshold && !(inv.max_quantity && qty > inv.max_quantity);
+                      return true;
+                    })
+                    .sort((a, b) => {
+                      const dir = stockSort.dir === "asc" ? 1 : -1;
+                      if (stockSort.col === "name")   return dir * (a.products?.name || "").localeCompare(b.products?.name || "");
+                      if (stockSort.col === "category") return dir * (a.products?.category || "").localeCompare(b.products?.category || "");
+                      if (stockSort.col === "venue")  return dir * (a.venues?.name || "").localeCompare(b.venues?.name || "");
+                      if (stockSort.col === "stock")  return dir * ((a.quantity || 0) - (b.quantity || 0));
+                      if (stockSort.col === "min") {
+                        const thresh = inv => inv.products?.low_stock_threshold || LOW_STOCK_THRESHOLDS[inv.products?.category] || LOW_STOCK_THRESHOLDS.default;
+                        return dir * (thresh(a) - thresh(b));
+                      }
+                      if (stockSort.col === "max")    return dir * ((a.max_quantity || 0) - (b.max_quantity || 0));
+                      if (stockSort.col === "status") {
+                        const rank = inv => { const t = inv.products?.low_stock_threshold || LOW_STOCK_THRESHOLDS[inv.products?.category] || LOW_STOCK_THRESHOLDS.default; const q = inv.quantity || 0; return (inv.max_quantity && q > inv.max_quantity) ? 0 : q > t ? 1 : q > 0 ? 2 : 3; };
+                        return dir * (rank(a) - rank(b));
+                      }
+                      return 0;
+                    });
+                  const si = (col) => stockSort.col === col ? (stockSort.dir === "asc" ? " ↑" : " ↓") : "";
+                  const hs = (col) => setStockSort(s => ({ col, dir: s.col === col && s.dir === "asc" ? "desc" : "asc" }));
+                  const colW = ["20%", "12%", "14%", "8%", "8%", "8%", "10%", "20%"];
+                  return (
+                    <>
+                      <table className="data-table" style={{ tableLayout: "fixed" }}>
+                        <colgroup>{colW.map((w, i) => <col key={i} style={{ width: w }} />)}</colgroup>
+                        <thead><tr>
+                          <th style={{ cursor: "pointer" }} onClick={() => hs("name")}>Product{si("name")}</th>
+                          <th style={{ cursor: "pointer" }} onClick={() => hs("category")}>Category{si("category")}</th>
+                          <th style={{ cursor: "pointer" }} onClick={() => hs("venue")}>Venue{si("venue")}</th>
+                          <th style={{ cursor: "pointer" }} onClick={() => hs("stock")}>Stock{si("stock")}</th>
+                          <th style={{ cursor: "pointer" }} onClick={() => hs("min")}>Min{si("min")}</th>
+                          <th style={{ cursor: "pointer" }} onClick={() => hs("max")}>Max{si("max")}</th>
+                          <th style={{ cursor: "pointer" }} onClick={() => hs("status")}>Status{si("status")}</th>
+                          <th>Actions</th>
+                        </tr></thead>
+                      </table>
+                      <div style={{ maxHeight: 480, overflowY: "auto" }}>
+                        <table className="data-table" style={{ tableLayout: "fixed" }}>
+                          <colgroup>{colW.map((w, i) => <col key={i} style={{ width: w }} />)}</colgroup>
+                          <tbody>
+                            {filteredInventory.map(inv => {
+                              const threshold = inv.products?.low_stock_threshold || LOW_STOCK_THRESHOLDS[inv.products?.category] || LOW_STOCK_THRESHOLDS.default;
+                              const qty = inv.quantity || 0;
+                              const maxQ = inv.max_quantity;
+                              const isOut = qty === 0;
+                              const isLow = qty > 0 && qty <= threshold;
+                              const isOver = maxQ && qty > maxQ;
+                              const statusLabel = isOut ? "Out" : isLow ? "Low" : isOver ? "Over" : "OK";
+                              const statusColor = isOut ? DS.colors.danger : isLow ? DS.colors.warn : isOver ? DS.colors.blue : DS.colors.accent;
+                              const editing = editingStock[inv.id];
+                              return (
+                                <tr key={inv.id}>
+                                  <td style={{ fontWeight: 600 }}>{inv.products?.name || "—"}</td>
+                                  <td><span className="tag-pill" style={{ background: DS.colors.accentGlow, color: DS.colors.accent, fontSize: 10 }}>{inv.products?.category || "—"}</span></td>
+                                  <td style={{ color: DS.colors.textSub, fontSize: 12 }}>{inv.venues?.name || "—"}</td>
+                                  <td style={{ fontFamily: DS.font.mono, fontWeight: 700, color: statusColor }}>{qty}</td>
+                                  <td>{editing ? <input style={{ ...inputStyle, width: 60, padding: "3px 6px" }} type="number" defaultValue={threshold} onChange={e => setEditingStock(s => ({ ...s, [inv.id]: { ...s[inv.id], min: e.target.value } }))} /> : threshold}</td>
+                                  <td>{editing ? <input style={{ ...inputStyle, width: 60, padding: "3px 6px" }} type="number" defaultValue={maxQ || ""} placeholder="—" onChange={e => setEditingStock(s => ({ ...s, [inv.id]: { ...s[inv.id], max: e.target.value } }))} /> : (maxQ || "—")}</td>
+                                  <td><span className="tag-pill" style={{ background: statusColor + "22", color: statusColor }}>{statusLabel}</span></td>
+                                  <td>
+                                    <div style={{ display: "flex", gap: 6 }}>
+                                      {editing ? (
+                                        <>
+                                          <button className="btn-sm btn-accent" onClick={() => saveStockThresholds(inv)}>Save</button>
+                                          <button className="btn-sm btn-outline" onClick={() => { const s = { ...editingStock }; delete s[inv.id]; setEditingStock(s); }}>Cancel</button>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <button className="btn-sm btn-outline" onClick={() => setEditingStock(s => ({ ...s, [inv.id]: {} }))}>Edit</button>
+                                          <button className="btn-sm btn-outline" style={{ color: DS.colors.warn, borderColor: DS.colors.warn }} onClick={() => flagForReorder(inv)}>Flag</button>
+                                        </>
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                            {filteredInventory.length === 0 && <tr><td colSpan={8} style={{ textAlign: "center", color: DS.colors.textMuted, padding: 32 }}>{inventory.length > 0 ? "No items match filters" : "No inventory records found"}</td></tr>}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
             )}
           </>
@@ -4143,45 +4725,89 @@ function AdminView() {
           <>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
               <div><div className="section-title">PURCHASING</div><div className="section-sub">Reorder alerts and purchase orders</div></div>
-              <button className="btn-sm btn-accent" onClick={() => { setPOForm(true); setPOFormData({ venue_id: "", supplier_email: "", notes: "", items: [] }); setPOVenueProducts([]); }}>+ New PO</button>
+              <button className="btn-sm btn-accent" onClick={() => { resetPOForm(); setPOForm(true); setPOVenueProducts([]); }}>+ New PO</button>
             </div>
 
             {loadingPOs ? (
               <div style={{ display: "flex", justifyContent: "center", padding: 40 }}><div className="spinner" /></div>
             ) : (
               <>
-                {reorderAlerts.length > 0 && (
-                  <div className="chart-card" style={{ border: `1px solid ${DS.colors.warn}33` }}>
-                    <div className="chart-title" style={{ color: DS.colors.warn, display: "flex", alignItems: "center", gap: 6 }}><AlertTriangle size={14} /> Reorder Alerts ({reorderAlerts.length})</div>
-                    <table className="data-table">
-                      <thead><tr><th>Venue</th><th>Product</th><th>Stock</th><th>Min</th><th>Suggested Qty</th><th></th></tr></thead>
-                      <tbody>
-                        {reorderAlerts.map(inv => {
-                          const threshold = inv.products?.low_stock_threshold || LOW_STOCK_THRESHOLDS.default;
-                          const suggested = inv.max_quantity ? Math.max(0, inv.max_quantity - (inv.quantity || 0)) : threshold * 3;
-                          return (
-                            <tr key={inv.id}>
-                              <td>{inv.venues?.name || "—"}</td>
-                              <td style={{ fontWeight: 600 }}>{inv.products?.name || "—"}</td>
-                              <td style={{ color: DS.colors.danger, fontWeight: 700 }}>{inv.quantity || 0}</td>
-                              <td>{threshold}</td>
-                              <td style={{ color: DS.colors.accent }}>{suggested}</td>
-                              <td><button className="btn-sm btn-outline" onClick={() => flagForReorder(inv)}>Create PO</button></td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+                {reorderAlerts.length > 0 && (() => {
+                  const byVenue = {};
+                  reorderAlerts.forEach(inv => {
+                    const vid = inv.venue_id;
+                    if (!byVenue[vid]) byVenue[vid] = { name: inv.venues?.name || "Unknown", items: [] };
+                    byVenue[vid].items.push(inv);
+                  });
+                  const venueGroups = Object.entries(byVenue);
+                  return (
+                    <div className="chart-card" style={{ border: `1px solid ${DS.colors.warn}33` }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                        <div className="chart-title" style={{ color: DS.colors.warn, display: "flex", alignItems: "center", gap: 6, margin: 0 }}><AlertTriangle size={14} /> Reorder Alerts ({reorderAlerts.length})</div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          {selectedAlerts.size > 0 && (
+                            <button className="btn-sm btn-accent" onClick={createBulkReorderPOs}>
+                              Consolidate selected into {[...new Set(reorderAlerts.filter(i => selectedAlerts.has(i.id)).map(i => i.venue_id))].length} PO{[...new Set(reorderAlerts.filter(i => selectedAlerts.has(i.id)).map(i => i.venue_id))].length !== 1 ? "s" : ""}
+                            </button>
+                          )}
+                          <label style={{ fontSize: 12, color: DS.colors.textMuted, display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                            <input type="checkbox" checked={selectedAlerts.size === reorderAlerts.length && reorderAlerts.length > 0} onChange={e => setSelectedAlerts(e.target.checked ? new Set(reorderAlerts.map(i => i.id)) : new Set())} />
+                            Select all
+                          </label>
+                        </div>
+                      </div>
+                      {venueGroups.map(([venueId, group]) => {
+                        const venueSelected = group.items.every(i => selectedAlerts.has(i.id));
+                        const venuePartial = !venueSelected && group.items.some(i => selectedAlerts.has(i.id));
+                        return (
+                          <div key={venueId} style={{ marginBottom: 16 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: `1px solid ${DS.colors.border}`, marginBottom: 4 }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                <input type="checkbox" ref={el => { if (el) el.indeterminate = venuePartial; }} checked={venueSelected} onChange={e => {
+                                  const s = new Set(selectedAlerts);
+                                  group.items.forEach(i => e.target.checked ? s.add(i.id) : s.delete(i.id));
+                                  setSelectedAlerts(s);
+                                }} />
+                                <span style={{ fontWeight: 700, fontSize: 13 }}>{group.name}</span>
+                                <span style={{ fontSize: 12, color: DS.colors.textMuted }}>{group.items.length} alert{group.items.length !== 1 ? "s" : ""}</span>
+                              </div>
+                              <button className="btn-sm btn-outline" style={{ color: DS.colors.warn, borderColor: DS.colors.warn }} onClick={() => createVenueReorderPO(venueId)}>
+                                Create 1 PO for all {group.items.length} item{group.items.length !== 1 ? "s" : ""}
+                              </button>
+                            </div>
+                            <table className="data-table">
+                              <thead><tr><th style={{ width: 32 }}></th><th>Product</th><th>Stock</th><th>Min</th><th>Suggested Qty</th><th style={{ width: 110 }}></th></tr></thead>
+                              <tbody>
+                                {group.items.map(inv => {
+                                  const threshold = inv.products?.low_stock_threshold || LOW_STOCK_THRESHOLDS.default;
+                                  const suggested = inv.max_quantity ? Math.max(0, inv.max_quantity - (inv.quantity || 0)) : threshold * 3;
+                                  return (
+                                    <tr key={inv.id}>
+                                      <td><input type="checkbox" checked={selectedAlerts.has(inv.id)} onChange={e => { const s = new Set(selectedAlerts); e.target.checked ? s.add(inv.id) : s.delete(inv.id); setSelectedAlerts(s); }} /></td>
+                                      <td style={{ fontWeight: 600 }}>{inv.products?.name || "—"}</td>
+                                      <td style={{ color: DS.colors.danger, fontWeight: 700 }}>{inv.quantity || 0}</td>
+                                      <td>{threshold}</td>
+                                      <td style={{ color: DS.colors.accent }}>{suggested}</td>
+                                      <td><button className="btn-sm btn-outline" onClick={() => flagForReorder(inv)}>Solo PO</button></td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
 
                 {poForm && (
                   <div style={{ background: DS.colors.card, border: `1px solid ${DS.colors.border}`, borderRadius: 10, padding: 20 }}>
-                    <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 16 }}>New Purchase Order</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 16 }}>{poFormData._editingId ? "Edit Purchase Order" : "New Purchase Order"}</div>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
                       <div style={fieldStyle}>
                         <div style={labelStyle}>Venue *</div>
-                        <select style={inputStyle} value={poFormData.venue_id} onChange={e => {
+                        <select style={{ ...inputStyle, opacity: poFormData._editingId ? 0.6 : 1 }} value={poFormData.venue_id} disabled={!!poFormData._editingId} onChange={e => {
                           const v = venues.find(v => v.id === e.target.value);
                           setPOFormData(d => ({ ...d, venue_id: e.target.value, supplier_email: v?.supplier_email || d.supplier_email }));
                           loadPOVenueProducts(e.target.value);
@@ -4194,7 +4820,12 @@ function AdminView() {
                       <div style={{ ...fieldStyle, gridColumn: "span 2" }}><div style={labelStyle}>Notes</div><input style={inputStyle} value={poFormData.notes || ""} onChange={e => setPOFormData(d => ({ ...d, notes: e.target.value }))} placeholder="e.g. Urgent restock" /></div>
                     </div>
                     <div style={{ marginBottom: 12 }}>
-                      <div style={{ ...labelStyle, marginBottom: 8 }}>Line Items</div>
+                      <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+                        <div style={{ flex: 2, fontSize: 11, color: DS.colors.textMuted, textTransform: "uppercase", letterSpacing: "0.06em" }}>Product</div>
+                        <div style={{ width: 80, fontSize: 11, color: DS.colors.textMuted, textTransform: "uppercase", letterSpacing: "0.06em" }}>Qty</div>
+                        <div style={{ width: 90, fontSize: 11, color: DS.colors.textMuted, textTransform: "uppercase", letterSpacing: "0.06em" }}>Cost (p)</div>
+                        <div style={{ width: 28 }} />
+                      </div>
                       {poFormData.items.map((it, idx) => (
                         <div key={it._key || idx} style={{ display: "flex", gap: 8, marginBottom: 6 }}>
                           {poVenueProducts.length > 0 ? (
@@ -4212,69 +4843,133 @@ function AdminView() {
                             <input style={{ ...inputStyle, flex: 2 }} value={it.name || ""} onChange={e => { const items = [...poFormData.items]; items[idx] = { ...items[idx], name: e.target.value }; setPOFormData(d => ({ ...d, items })); }} placeholder="Product name" />
                           )}
                           <input style={{ ...inputStyle, width: 80, flex: "none" }} type="number" min={1} value={it.qty || ""} onChange={e => { const items = [...poFormData.items]; items[idx] = { ...items[idx], qty: Number(e.target.value) }; setPOFormData(d => ({ ...d, items })); }} placeholder="Qty" />
+                          <input style={{ ...inputStyle, width: 90, flex: "none" }} type="number" min={0} step="0.0001" value={it.unit_cost || ""} onChange={e => { const items = [...poFormData.items]; items[idx] = { ...items[idx], unit_cost: e.target.value }; setPOFormData(d => ({ ...d, items })); }} placeholder="Cost (p)" />
                           <button className="btn-sm btn-outline" style={{ color: DS.colors.danger, borderColor: DS.colors.danger, flex: "none" }} onClick={() => setPOFormData(d => ({ ...d, items: d.items.filter((_, i) => i !== idx) }))}><X size={12} /></button>
                         </div>
                       ))}
-                      <button className="btn-sm btn-outline" onClick={() => setPOFormData(d => ({ ...d, items: [...d.items, { name: "", qty: 1, product_id: null, _key: crypto.randomUUID() }] }))}>+ Add Item</button>
+                      <button className="btn-sm btn-outline" onClick={() => setPOFormData(d => ({ ...d, items: [...d.items, { name: "", qty: 1, unit_cost: "", product_id: null, _key: crypto.randomUUID() }] }))}>+ Add Item</button>
                     </div>
                     <div style={{ display: "flex", gap: 8 }}>
-                      <button className="btn-sm btn-accent" onClick={() => createPO(false)}>Save as Draft</button>
-                      <button className="btn-sm btn-outline" style={{ color: DS.colors.blue, borderColor: DS.colors.blue }} onClick={() => createPO(true)}>Send via Email</button>
-                      <button className="btn-sm btn-outline" onClick={() => setPOForm(false)}>Cancel</button>
+                      <button className="btn-sm btn-accent" onClick={() => handleSavePO(false)}>Save as Draft</button>
+                      <button className="btn-sm btn-outline" style={{ color: DS.colors.blue, borderColor: DS.colors.blue }} onClick={() => handleSavePO(true)}>Send via Email</button>
+                      <button className="btn-sm btn-outline" onClick={resetPOForm}>Cancel</button>
                     </div>
                   </div>
                 )}
 
                 <div className="chart-card" style={{ padding: 0, overflow: "hidden" }}>
                   <div style={{ padding: "14px 16px", borderBottom: `1px solid ${DS.colors.border}` }}>
-                    <div className="chart-title" style={{ marginBottom: 0 }}>Purchase Orders</div>
+                    <div className="chart-title" style={{ marginBottom: 8 }}>Purchase Orders</div>
+                    {selectedPOIds.size >= 2 && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10, padding: "8px 12px", background: DS.colors.accentGlow || DS.colors.accent + "22", borderRadius: 6 }}>
+                        <span style={{ fontSize: 12, color: DS.colors.textMuted }}>{selectedPOIds.size} drafts selected</span>
+                        <button className="btn-sm btn-accent" onClick={mergePOs}>Merge into One PO</button>
+                        <button className="btn-sm btn-outline" onClick={() => setSelectedPOIds(new Set())}>Clear</button>
+                      </div>
+                    )}
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                      {["all", "draft", "sent", "received"].map(s => (
+                        <button key={s} className="btn-sm btn-outline" style={{ color: poFilterStatus === s ? DS.colors.accent : DS.colors.textMuted, borderColor: poFilterStatus === s ? DS.colors.accent : DS.colors.border }} onClick={() => setPOFilterStatus(s)}>{s === "all" ? "All" : s.charAt(0).toUpperCase() + s.slice(1)}</button>
+                      ))}
+                      <select style={{ ...inputStyle, width: "auto", minWidth: 120, flex: "none" }} value={poFilterVenue} onChange={e => setPOFilterVenue(e.target.value)}>
+                        <option value="all">All venues</option>
+                        {venues.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                      </select>
+                      <input style={{ ...inputStyle, width: 200, flex: "none" }} value={poSearch} onChange={e => setPOSearch(e.target.value)} placeholder="Search product or supplier…" />
+                    </div>
                   </div>
-                  <table className="data-table">
-                    <thead><tr><th>Date</th><th>Venue</th><th>Status</th><th>Items</th><th>Supplier</th><th>Actions</th></tr></thead>
-                    <tbody>
-                      {purchaseOrders.map(po => {
-                        const statusColor = po.status === "received" ? DS.colors.accent : po.status === "sent" ? DS.colors.blue : DS.colors.textMuted;
-                        return [
-                          <tr key={po.id}>
-                            <td style={{ fontSize: 12 }}>{new Date(po.created_at).toLocaleDateString("en-GB")}</td>
-                            <td>{po.venues?.name || "—"}</td>
-                            <td><span className="tag-pill" style={{ background: statusColor + "22", color: statusColor }}>{po.status}</span></td>
-                            <td>{po.purchase_order_items?.length || 0} items</td>
-                            <td style={{ fontSize: 12, color: DS.colors.textSub }}>{po.supplier_email || po.venues?.supplier_email || "—"}</td>
-                            <td>
-                              <div style={{ display: "flex", gap: 6 }}>
-                                <button className="btn-sm btn-outline" onClick={() => setExpandedPO(expandedPO === po.id ? null : po.id)}>Details</button>
-                                {po.status === "draft" && (
-                                  <button className="btn-sm btn-outline" style={{ color: DS.colors.blue, borderColor: DS.colors.blue }} onClick={() => {
-                                    const email = po.supplier_email || po.venues?.supplier_email || "";
-                                    const body = (po.purchase_order_items || []).map(it => `- ${it.products?.name || it.product_id}: ${it.quantity_ordered}`).join("\n");
-                                    window.open(`mailto:${email}?subject=${encodeURIComponent("Purchase Order — " + (po.venues?.name || ""))}&body=${encodeURIComponent(body)}`);
-                                    supabase.from("purchase_orders").update({ status: "sent" }).eq("id", po.id).then(() => loadPurchasing());
-                                  }}>Send</button>
-                                )}
-                                {po.status === "sent" && <button className="btn-sm btn-accent" onClick={() => markPOReceived(po)}>Mark Received</button>}
-                              </div>
-                            </td>
-                          </tr>,
-                          expandedPO === po.id && (
-                            <tr key={po.id + "-exp"}>
-                              <td colSpan={6} style={{ background: DS.colors.surface, padding: "10px 16px" }}>
-                                <div style={{ fontSize: 12, color: DS.colors.textMuted, marginBottom: 6 }}>Line items</div>
-                                {(po.purchase_order_items || []).map(it => (
-                                  <div key={it.id} style={{ display: "flex", gap: 16, fontSize: 13, padding: "2px 0" }}>
-                                    <span>{it.products?.name || it.product_id}</span>
-                                    <span style={{ color: DS.colors.accent }}>× {it.quantity_ordered}</span>
+                  {(() => {
+                    const searchQuery = poSearch.trim().toLowerCase();
+                    const filteredPOs = purchaseOrders
+                      .filter(po => poFilterStatus === "all" || po.status === poFilterStatus)
+                      .filter(po => poFilterVenue === "all" || po.venue_id === poFilterVenue)
+                      .filter(po => {
+                        if (!searchQuery) return true;
+                        return (po.supplier_email||"").toLowerCase().includes(searchQuery)
+                          || (po.venues?.name||"").toLowerCase().includes(searchQuery)
+                          || (po.purchase_order_items||[]).some(it => (it.products?.name||"").toLowerCase().includes(searchQuery));
+                      })
+                      .sort((a, b) => {
+                        const dir = poSort.dir === "asc" ? 1 : -1;
+                        if (poSort.col === "date")   return dir * (Date.parse(a.created_at) - Date.parse(b.created_at));
+                        if (poSort.col === "venue")  return dir * (a.venues?.name||"").localeCompare(b.venues?.name||"");
+                        if (poSort.col === "status") return dir * a.status.localeCompare(b.status);
+                        if (poSort.col === "total")  return dir * ((poTotal(a)??-1) - (poTotal(b)??-1));
+                        return 0;
+                      });
+                    const sortIcon = (col) => poSort.col === col ? (poSort.dir === "asc" ? " ↑" : " ↓") : "";
+                    const handleSort = (col) => setPOSort(s => ({ col, dir: s.col === col && s.dir === "asc" ? "desc" : "asc" }));
+                    return (
+                      <table className="data-table">
+                        <thead><tr>
+                          <th style={{ width: 36 }}></th>
+                          <th style={{ cursor: "pointer" }} onClick={() => handleSort("date")}>Date{sortIcon("date")}</th>
+                          <th style={{ cursor: "pointer" }} onClick={() => handleSort("venue")}>Venue{sortIcon("venue")}</th>
+                          <th style={{ cursor: "pointer" }} onClick={() => handleSort("status")}>Status{sortIcon("status")}</th>
+                          <th>Items</th>
+                          <th style={{ cursor: "pointer" }} onClick={() => handleSort("total")}>Total{sortIcon("total")}</th>
+                          <th>Supplier</th>
+                          <th>Actions</th>
+                        </tr></thead>
+                        <tbody>
+                          {filteredPOs.map(po => {
+                            const statusColor = po.status === "received" ? DS.colors.accent : po.status === "sent" ? DS.colors.blue : DS.colors.textMuted;
+                            const total = poTotal(po);
+                            return [
+                              <tr key={po.id}>
+                                <td>{po.status === "draft" && <input type="checkbox" checked={selectedPOIds.has(po.id)} onChange={e => { const s = new Set(selectedPOIds); e.target.checked ? s.add(po.id) : s.delete(po.id); setSelectedPOIds(s); }} />}</td>
+                                <td style={{ fontSize: 12 }}>{new Date(po.created_at).toLocaleDateString("en-GB")}</td>
+                                <td>{po.venues?.name || "—"}</td>
+                                <td><span className="tag-pill" style={{ background: statusColor + "22", color: statusColor }}>{po.status}</span></td>
+                                <td>{po.purchase_order_items?.length || 0} items</td>
+                                <td style={{ fontSize: 12, color: DS.colors.accent }}>{total != null ? `£${(total/100).toFixed(2)}` : "—"}</td>
+                                <td style={{ fontSize: 12, color: DS.colors.textSub }}>{po.supplier_email || po.venues?.supplier_email || "—"}</td>
+                                <td>
+                                  <div style={{ display: "flex", gap: 6 }}>
+                                    <button className="btn-sm btn-outline" onClick={() => setExpandedPO(expandedPO === po.id ? null : po.id)}>Details</button>
+                                    {po.status === "draft" && (
+                                      <>
+                                        <button className="btn-sm btn-outline" onClick={() => startEditPO(po)}>Edit</button>
+                                        <button className="btn-sm btn-outline" style={{ color: DS.colors.blue, borderColor: DS.colors.blue }} onClick={() => {
+                                          const email = po.supplier_email || po.venues?.supplier_email || "";
+                                          const body = (po.purchase_order_items || []).map(it => `- ${it.products?.name || it.product_id}: ${it.quantity_ordered}`).join("\n");
+                                          window.open(`mailto:${email}?subject=${encodeURIComponent("Purchase Order — " + (po.venues?.name || ""))}&body=${encodeURIComponent(body)}`);
+                                          supabase.from("purchase_orders").update({ status: "sent" }).eq("id", po.id).then(() => loadPurchasing());
+                                        }}>Send</button>
+                                        <button className="btn-sm btn-outline" style={{ color: DS.colors.danger, borderColor: DS.colors.danger }} onClick={() => deletePO(po.id)}>Delete</button>
+                                      </>
+                                    )}
+                                    {po.status === "sent" && <button className="btn-sm btn-accent" onClick={() => markPOReceived(po)}>Mark Received</button>}
                                   </div>
-                                ))}
-                                {po.notes && <div style={{ marginTop: 8, fontSize: 12, color: DS.colors.textSub }}>Note: {po.notes}</div>}
-                              </td>
-                            </tr>
-                          ),
-                        ];
-                      })}
-                      {purchaseOrders.length === 0 && <tr><td colSpan={6} style={{ textAlign: "center", color: DS.colors.textMuted, padding: 32 }}>No purchase orders yet</td></tr>}
-                    </tbody>
-                  </table>
+                                </td>
+                              </tr>,
+                              expandedPO === po.id && (
+                                <tr key={po.id + "-exp"}>
+                                  <td colSpan={8} style={{ background: DS.colors.surface, padding: "10px 16px" }}>
+                                    <div style={{ fontSize: 12, color: DS.colors.textMuted, marginBottom: 6 }}>Line items</div>
+                                    {(po.purchase_order_items || []).map(it => {
+                                      const subtotal = it.unit_cost != null ? (it.unit_cost * it.quantity_ordered) : null;
+                                      return (
+                                        <div key={it.id} style={{ display: "flex", gap: 16, fontSize: 13, padding: "2px 0" }}>
+                                          <span>{it.products?.name || it.product_id}</span>
+                                          <span style={{ color: DS.colors.accent }}>× {it.quantity_ordered}</span>
+                                          {it.unit_cost != null && <span style={{ color: DS.colors.textMuted }}>@ £{(it.unit_cost/100).toFixed(2)}</span>}
+                                          {subtotal != null && <span style={{ color: DS.colors.textSub }}>= £{(subtotal/100).toFixed(2)}</span>}
+                                        </div>
+                                      );
+                                    })}
+                                    {total != null && <div style={{ marginTop: 8, fontSize: 13, fontWeight: 600, color: DS.colors.accent }}>Total: £{(total/100).toFixed(2)}</div>}
+                                    {po.notes && <div style={{ marginTop: 8, fontSize: 12, color: DS.colors.textSub }}>Note: {po.notes}</div>}
+                                  </td>
+                                </tr>
+                              ),
+                            ];
+                          })}
+                          {filteredPOs.length === 0 && <tr><td colSpan={8} style={{ textAlign: "center", color: DS.colors.textMuted, padding: 32 }}>No purchase orders{purchaseOrders.length > 0 ? " matching filters" : " yet"}</td></tr>}
+                        </tbody>
+                      </table>
+                    );
+                  })()}
                 </div>
               </>
             )}
@@ -4324,7 +5019,7 @@ function AdminView() {
                           <td style={{ color: DS.colors.accent }}>{fmt(penceToGBP(v.jarvidShare))}</td>
                           <td style={{ color: DS.colors.blue }}>{fmt(penceToGBP(v.jarvidMargin))}</td>
                           <td style={{ color: DS.colors.accent, fontWeight: 700 }}>{fmt(penceToGBP(v.jarvidTotal))}</td>
-                          <td><span className="tag-pill" style={{ background: "rgba(0,245,196,0.1)", color: DS.colors.accent, fontSize: 11 }}>{100 - (v.jarvid_profit_share_pct || 20)}/{v.jarvid_profit_share_pct || 20}</span></td>
+                          <td><span className="tag-pill" style={{ background: "rgba(0,245,196,0.1)", color: DS.colors.accent, fontSize: 11 }}>J {v.jarvid_profit_share_pct || 20}% / V {100 - (v.jarvid_profit_share_pct || 20)}%</span></td>
                         </tr>
                       ))}
                     </tbody>
@@ -4398,31 +5093,99 @@ function AdminView() {
         {/* ===== SETTINGS ===== */}
         {adminSection === "settings" && (
           <>
-            <div><div className="section-title">PLATFORM SETTINGS</div><div className="section-sub">Default configuration for new venues</div></div>
-            <div className="chart-card">
-              <div className="chart-title">Platform Defaults</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-                <div style={{ background: DS.colors.surface, borderRadius: 8, padding: 16 }}>
-                  <div style={labelStyle}>Default Profit Share %</div>
-                  <div style={{ fontSize: 28, fontFamily: DS.font.display, fontWeight: 700, color: DS.colors.accent }}>20%</div>
-                  <div style={{ fontSize: 12, color: DS.colors.textMuted }}>JarvID share of gross profit per order</div>
-                </div>
-                <div style={{ background: DS.colors.surface, borderRadius: 8, padding: 16 }}>
-                  <div style={labelStyle}>Default Subscription Plan</div>
-                  <div style={{ fontSize: 28, fontFamily: DS.font.display, fontWeight: 700, color: DS.colors.blue }}>Pro</div>
-                  <div style={{ fontSize: 12, color: DS.colors.textMuted }}>£149.00/mo per venue</div>
-                </div>
-                <div style={{ background: DS.colors.surface, borderRadius: 8, padding: 16 }}>
-                  <div style={labelStyle}>Low Stock Default Threshold</div>
-                  <div style={{ fontSize: 28, fontFamily: DS.font.display, fontWeight: 700, color: DS.colors.warn }}>5 units</div>
-                  <div style={{ fontSize: 12, color: DS.colors.textMuted }}>Per-product thresholds override this</div>
-                </div>
-                <div style={{ background: DS.colors.surface, borderRadius: 8, padding: 16 }}>
-                  <div style={labelStyle}>Persistence</div>
-                  <div style={{ fontSize: 13, color: DS.colors.textSub, marginTop: 4 }}>Settings stored per-venue in the <code>venues</code> table. Add a <code>platform_settings</code> table when global defaults need to be editable.</div>
-                </div>
-              </div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div><div className="section-title">PLATFORM SETTINGS</div><div className="section-sub">Default configuration applied when creating new venues</div></div>
+              {!editingSettings && (
+                <button className="btn-sm btn-outline" style={{ color: DS.colors.accent, borderColor: DS.colors.accent }} onClick={() => { setSettingsFormData({ ...platformSettings }); setEditingSettings(true); }}>Edit</button>
+              )}
             </div>
+
+            {platformSettings && (
+              <>
+                <div className="chart-card">
+                  <div className="chart-title">New Venue Defaults</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+                    {editingSettings ? (
+                      <>
+                        <div style={fieldStyle}>
+                          <div style={labelStyle}>JarvID Cut % (default)</div>
+                          <input style={inputStyle} type="number" min="0" max="100" value={settingsFormData.default_jarvid_pct ?? ""} onChange={e => setSettingsFormData(d => ({ ...d, default_jarvid_pct: e.target.value }))} />
+                          <div style={{ fontSize: 11, color: DS.colors.textMuted }}>Venue keeps {100 - (settingsFormData.default_jarvid_pct || 0)}%</div>
+                        </div>
+                        <div style={fieldStyle}>
+                          <div style={labelStyle}>Default Subscription Plan</div>
+                          <select style={inputStyle} value={settingsFormData.default_subscription_plan || "pro"} onChange={e => setSettingsFormData(d => ({ ...d, default_subscription_plan: e.target.value }))}>
+                            <option value="free">Free</option>
+                            <option value="starter">Starter</option>
+                            <option value="pro">Pro</option>
+                          </select>
+                        </div>
+                        <div style={fieldStyle}>
+                          <div style={labelStyle}>Default Monthly Fee (pence)</div>
+                          <input style={inputStyle} type="number" value={settingsFormData.default_monthly_fee_pence ?? ""} onChange={e => setSettingsFormData(d => ({ ...d, default_monthly_fee_pence: e.target.value }))} />
+                          <div style={{ fontSize: 11, color: DS.colors.textMuted }}>£{((settingsFormData.default_monthly_fee_pence || 0) / 100).toFixed(2)}/mo</div>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div style={{ background: DS.colors.surface, borderRadius: 8, padding: 16 }}>
+                          <div style={labelStyle}>JarvID Cut % (default)</div>
+                          <div style={{ fontSize: 28, fontFamily: DS.font.display, fontWeight: 700, color: DS.colors.accent }}>{platformSettings.default_jarvid_pct}%</div>
+                          <div style={{ fontSize: 12, color: DS.colors.textMuted }}>Venue keeps {100 - platformSettings.default_jarvid_pct}%</div>
+                        </div>
+                        <div style={{ background: DS.colors.surface, borderRadius: 8, padding: 16 }}>
+                          <div style={labelStyle}>Default Subscription Plan</div>
+                          <div style={{ fontSize: 28, fontFamily: DS.font.display, fontWeight: 700, color: DS.colors.blue, textTransform: "capitalize" }}>{platformSettings.default_subscription_plan}</div>
+                        </div>
+                        <div style={{ background: DS.colors.surface, borderRadius: 8, padding: 16 }}>
+                          <div style={labelStyle}>Default Monthly Fee</div>
+                          <div style={{ fontSize: 28, fontFamily: DS.font.display, fontWeight: 700, color: DS.colors.text }}>£{(platformSettings.default_monthly_fee_pence / 100).toFixed(2)}</div>
+                          <div style={{ fontSize: 12, color: DS.colors.textMuted }}>per venue/mo</div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                <div className="chart-card">
+                  <div className="chart-title">Low Stock Thresholds</div>
+                  <div style={{ fontSize: 12, color: DS.colors.textMuted, marginBottom: 12 }}>
+                    Alert formula: <code style={{ background: DS.colors.surface, padding: "2px 6px", borderRadius: 4 }}>stock &gt; 0 AND stock ≤ threshold</code>
+                    &nbsp;· Priority: per-product override &gt; category default &gt; global default
+                  </div>
+                  <table className="data-table">
+                    <thead><tr><th>Category</th><th>Trigger condition</th>{editingSettings && <th style={{ width: 120 }}>Threshold</th>}</tr></thead>
+                    <tbody>
+                      {[
+                        { key: "low_stock_eliquid",        label: "E-Liquid" },
+                        { key: "low_stock_prefilled_pod",  label: "Prefilled Pod" },
+                        { key: "low_stock_refillable_kit", label: "Refillable Kit" },
+                        { key: "low_stock_refillable_pods",label: "Replacement Pods" },
+                        { key: "low_stock_default",        label: "Default (all others)" },
+                      ].map(({ key, label }) => {
+                        const val = editingSettings ? (settingsFormData[key] ?? platformSettings[key]) : platformSettings[key];
+                        return (
+                          <tr key={key}>
+                            <td style={{ fontWeight: 600 }}>{label}</td>
+                            <td style={{ fontFamily: DS.font.mono, fontSize: 12, color: DS.colors.warn }}>stock &gt; 0 AND stock ≤ {val}</td>
+                            {editingSettings && (
+                              <td><input style={{ ...inputStyle, width: 80, padding: "3px 8px" }} type="number" min="1" value={settingsFormData[key] ?? platformSettings[key]} onChange={e => setSettingsFormData(d => ({ ...d, [key]: e.target.value }))} /></td>
+                            )}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {editingSettings && (
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button className="btn-sm btn-accent" onClick={savePlatformSettings} disabled={savingSettings}>{savingSettings ? "Saving…" : "Save Changes"}</button>
+                    <button className="btn-sm btn-outline" onClick={() => setEditingSettings(false)}>Cancel</button>
+                  </div>
+                )}
+              </>
+            )}
           </>
         )}
 
@@ -4473,7 +5236,7 @@ function LoginScreen({ onLogin, onBack }) {
     <div className="auth-screen">
       <div className="auth-card">
         <div>
-          <div className="auth-logo">J<span>arv</span>ID</div>
+          <div className="auth-logo">JARV<span>-ID</span></div>
           <div className="auth-subtitle">STAFF & MANAGER PORTAL</div>
         </div>
         <form className="auth-form" onSubmit={handleLogin}>
@@ -4722,7 +5485,7 @@ export default function App() {
         )}
         <style>{`@keyframes shake { 0%,100%{transform:translateX(0)} 20%,60%{transform:translateX(-8px)} 40%,80%{transform:translateX(8px)} }`}</style>
         <nav className="top-nav">
-          <div className="nav-logo" onClick={handleLogoTap} style={{ cursor: kioskLocked ? "default" : "pointer", userSelect: "none" }}>J<span>arv</span>ID</div>
+          <div className="nav-logo" onClick={handleLogoTap} style={{ cursor: kioskLocked ? "default" : "pointer", userSelect: "none" }}>JARV<span>-ID</span></div>
           <div className="nav-tabs">
             {tabs.map(t => {
               const TabIcon = t.icon;
