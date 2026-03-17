@@ -491,6 +491,12 @@
   <span>jarv-id.com</span>
 </footer>
 
+<div id="consent-bar" style="display:none">
+  <p>We use cookies to understand how visitors use this site and improve it. No data is shared or sold.</p>
+  <button class="consent-btn-decline" id="consentDecline">Decline</button>
+  <button class="consent-btn-accept" id="consentAccept">Accept</button>
+</div>
+
 <script>
   const FUNCTION_URL = "https://kidyoplpqmvebujypndu.supabase.co/functions/v1/submit-demo-request";
   const ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtpZHlvcGxwcW12ZWJ1anlwbmR1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMxNTE2NTIsImV4cCI6MjA4ODcyNzY1Mn0.-6NCLaPF8TtJvQ1C0TtT8A24sh9HLjEv1lTJ8Sge6Qg";
@@ -599,12 +605,6 @@
     document.getElementById('consent-bar').style.display = 'none';
   });
 </script>
-
-<div id="consent-bar" style="display:none">
-  <p>We use cookies to understand how visitors use this site and improve it. No data is shared or sold.</p>
-  <button class="consent-btn-decline" id="consentDecline">Decline</button>
-  <button class="consent-btn-accept" id="consentAccept">Accept</button>
-</div>
 
 </body>
 </html>
