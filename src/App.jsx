@@ -1477,15 +1477,27 @@ function KioskView({ venueId: propVenueId }) {
     const devId = getDeviceId();
 
     const register = async () => {
-      // Check if this device already has a row
       const { data } = await supabase.from("kiosks").select("id").eq("device_id", devId).single();
-      const id = data?.id || crypto.randomUUID();
-      // Upsert first — only set state if the row lands in the DB
-      const err = await sendHeartbeat(id, devId);
-      if (!err) setKioskDbId(id);
-      else console.error("Kiosk registration failed", err);
-      // Heartbeat every 60 seconds
-      heartbeatTimer.current = setInterval(() => sendHeartbeat(id, devId), 60000);
+      if (data?.id) {
+        // Existing kiosk — update heartbeat in-place
+        setKioskDbId(data.id);
+        await supabase.from("kiosks").update({ status: "online", last_heartbeat: new Date().toISOString() }).eq("id", data.id);
+        heartbeatTimer.current = setInterval(() => sendHeartbeat(data.id, devId), 60000);
+      } else {
+        // New kiosk — insert first, only set state on success
+        const newId = crypto.randomUUID();
+        const { error } = await supabase.from("kiosks").insert({
+          id: newId, device_id: devId, venue_id: venueId,
+          name: `Kiosk · ${venueId.slice(0, 8)}`, status: "online",
+          last_heartbeat: new Date().toISOString(), app_version: "1.0.0",
+        });
+        if (!error) {
+          setKioskDbId(newId);
+          heartbeatTimer.current = setInterval(() => sendHeartbeat(newId, devId), 60000);
+        } else {
+          console.error("Kiosk registration failed", error);
+        }
+      }
     };
 
     register();
