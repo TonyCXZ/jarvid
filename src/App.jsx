@@ -1454,7 +1454,7 @@ function KioskView({ venueId: propVenueId }) {
   };
 
   const sendHeartbeat = async (dbId, devId) => {
-    if (!venueId) return;
+    if (!venueId) return null;
     const { error } = await supabase.from("kiosks").upsert({
       id: dbId,
       device_id: devId,
@@ -1468,6 +1468,7 @@ function KioskView({ venueId: propVenueId }) {
       setIsOffline(false);
       setOfflineRetryCount(0);
     }
+    return error;
   };
 
   // Register kiosk and start heartbeat on mount
@@ -1479,8 +1480,10 @@ function KioskView({ venueId: propVenueId }) {
       // Check if this device already has a row
       const { data } = await supabase.from("kiosks").select("id").eq("device_id", devId).single();
       const id = data?.id || crypto.randomUUID();
-      setKioskDbId(id);
-      await sendHeartbeat(id, devId);
+      // Upsert first — only set state if the row lands in the DB
+      const err = await sendHeartbeat(id, devId);
+      if (!err) setKioskDbId(id);
+      else console.error("Kiosk registration failed", err);
       // Heartbeat every 60 seconds
       heartbeatTimer.current = setInterval(() => sendHeartbeat(id, devId), 60000);
     };
