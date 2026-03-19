@@ -1050,12 +1050,12 @@ function KioskAgeVerify({ onVerified, onBack, onHome, kioskId }) {
     return (
       <div className="age-verify-screen" style={{ position: "relative" }}>
         {navButtons}
-        <div style={{ fontSize: 60 }}>👤</div>
+        <div style={{ color: DS.colors.warn }}><User size={60} strokeWidth={1.5} /></div>
         <div className="age-heading">STAFF VERIFICATION</div>
         <div className="age-sub">A staff member will verify your age shortly. Please wait…</div>
         <div className="scanning-animation" style={{ borderColor: DS.colors.warn }}>
           <div className="scan-line" style={{ background: `linear-gradient(90deg, transparent, ${DS.colors.warn}, transparent)` }} />
-          <div style={{ fontSize: 40 }}>⏳</div>
+          <div style={{ color: DS.colors.warn }}><Clock size={40} strokeWidth={1.5} /></div>
           <div className="scan-text" style={{ color: DS.colors.warn }}>Awaiting staff approval</div>
         </div>
       </div>
@@ -1276,7 +1276,7 @@ function KioskPaymentInner({ cart, products, onPaid, onBack, onHome, verificatio
 
 function KioskPayment(props) {
   return (
-    <Elements stripe={stripePromise}>
+    <Elements stripe={stripePromise} options={{ disableLink: true }}>
       <KioskPaymentInner {...props} />
     </Elements>
   );
@@ -1325,7 +1325,7 @@ function KioskConfirmation({ cart, products, orderId, onReset }) {
         </div>
       </div>
       <div style={{ padding: "16px 24px", borderRadius: 12, background: DS.colors.accentGlow, border: `1px solid ${DS.colors.accent}`, color: DS.colors.accent, fontSize: 16, fontWeight: 600, textAlign: "center" }}>
-        👤 A staff member will bring your order to you shortly
+        <User size={16} strokeWidth={1.5} style={{ display: "inline", verticalAlign: "middle", marginRight: 6 }} /> A staff member will bring your order to you shortly
       </div>
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
         <div style={{ fontSize: 13, color: DS.colors.textMuted }}>
