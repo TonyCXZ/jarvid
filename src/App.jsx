@@ -4493,18 +4493,16 @@ function AdminView() {
                     {/* URL Slug */}
                     <div style={{ marginBottom: 10 }}>
                       <div style={{ fontSize: 11, color: DS.colors.textMuted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>URL Slug</div>
-                      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                        <span style={{ fontSize: 11, color: DS.colors.textMuted, whiteSpace: "nowrap" }}>app.jarv-id.com/</span>
+                      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                         <input
                           type="text"
                           id={`slug-${v.id}`}
                           defaultValue={v.slug || ""}
                           key={`slug-${v.id}`}
                           placeholder="venue-slug"
-                          style={{ background: DS.colors.surface, border: `1px solid ${DS.colors.border}`, borderRadius: 6, padding: "6px 10px", color: DS.colors.text, fontSize: 13, fontFamily: DS.font.body, width: 140, minWidth: 80, flex: "1 1 80px", maxWidth: 200, outline: "none" }}
+                          style={{ background: DS.colors.surface, border: `1px solid ${DS.colors.border}`, borderRadius: 6, padding: "6px 10px", color: DS.colors.text, fontSize: 13, fontFamily: DS.font.body, flex: 1, minWidth: 0, outline: "none" }}
                           onChange={e => { e.target.value = e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""); }}
                         />
-                        <span style={{ fontSize: 11, color: DS.colors.textMuted, whiteSpace: "nowrap" }}>/kiosk</span>
                         <button className="btn-sm btn-accent" style={{ flexShrink: 0 }} onClick={async () => {
                           const input = document.getElementById(`slug-${v.id}`);
                           const newSlug = input?.value?.trim();
@@ -4513,6 +4511,9 @@ function AdminView() {
                           if (error?.code === "23505") { alert("This slug is already taken — choose a different one"); }
                           else if (!error) { input.style.borderColor = DS.colors.accent; setTimeout(() => input.style.borderColor = DS.colors.border, 2000); loadVenues(); }
                         }}>Save</button>
+                      </div>
+                      <div style={{ fontSize: 11, color: DS.colors.textMuted, marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        app.jarv-id.com/<span style={{ color: DS.colors.text }}>{v.slug || "…"}</span>/kiosk
                       </div>
                     </div>
                     <div style={{ marginBottom: 10 }}>
