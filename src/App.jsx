@@ -4490,19 +4490,19 @@ function AdminView() {
                     {/* URL Slug */}
                     <div style={{ marginBottom: 10 }}>
                       <div style={{ fontSize: 11, color: DS.colors.textMuted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>URL Slug</div>
-                      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                        <span style={{ fontSize: 11, color: DS.colors.textMuted }}>app.jarv-id.com/</span>
+                      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 11, color: DS.colors.textMuted, whiteSpace: "nowrap" }}>app.jarv-id.com/</span>
                         <input
                           type="text"
                           id={`slug-${v.id}`}
                           defaultValue={v.slug || ""}
                           key={`slug-${v.id}`}
                           placeholder="venue-slug"
-                          style={{ background: DS.colors.surface, border: `1px solid ${DS.colors.border}`, borderRadius: 6, padding: "6px 10px", color: DS.colors.text, fontSize: 13, fontFamily: DS.font.body, width: 140, outline: "none" }}
+                          style={{ background: DS.colors.surface, border: `1px solid ${DS.colors.border}`, borderRadius: 6, padding: "6px 10px", color: DS.colors.text, fontSize: 13, fontFamily: DS.font.body, width: 140, minWidth: 80, flex: "1 1 80px", maxWidth: 200, outline: "none" }}
                           onChange={e => { e.target.value = e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""); }}
                         />
-                        <span style={{ fontSize: 11, color: DS.colors.textMuted }}>/kiosk</span>
-                        <button className="btn-sm btn-accent" onClick={async () => {
+                        <span style={{ fontSize: 11, color: DS.colors.textMuted, whiteSpace: "nowrap" }}>/kiosk</span>
+                        <button className="btn-sm btn-accent" style={{ flexShrink: 0 }} onClick={async () => {
                           const input = document.getElementById(`slug-${v.id}`);
                           const newSlug = input?.value?.trim();
                           if (!newSlug || !/^[a-z0-9-]+$/.test(newSlug)) { alert("Slug must be lowercase letters, numbers, and hyphens only"); return; }
@@ -5626,7 +5626,7 @@ function StaffRoute() {
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
-    navigate("/", { replace: true });
+    window.location.assign("/");
   };
 
   if (!authChecked || venueLoading) return (
