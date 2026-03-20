@@ -67,6 +67,7 @@ Deno.serve(async (req: Request) => {
     const paymentIntent = await stripe.paymentIntents.create({
       amount: totalPence,
       currency: "gbp",
+      payment_method_types: ["card"],
       transfer_data: { destination: venue.stripe_account_id, amount: transferAmount },
       metadata: { venue_id, ...(order_id ? { order_id } : {}) },
     });
