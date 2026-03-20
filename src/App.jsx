@@ -4545,9 +4545,19 @@ function AdminView() {
                     </div>
                     <div style={{ marginBottom: 4 }}>
                       {v.stripe_account_id ? (
-                        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#22c55e" }}>
-                          <Check size={13} /> Stripe connected
-                          <span style={{ color: DS.colors.textMuted, fontSize: 11, marginLeft: 4 }}>{v.stripe_account_id.slice(0, 16)}…</span>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#22c55e" }}>
+                            <Check size={13} /> Stripe connected
+                            <span style={{ color: DS.colors.textMuted, fontSize: 11, marginLeft: 4 }}>{v.stripe_account_id.slice(0, 16)}…</span>
+                          </div>
+                          <button
+                            className="btn-sm btn-outline"
+                            style={{ width: "100%", fontSize: 11, color: DS.colors.textMuted, borderColor: DS.colors.border }}
+                            onClick={() => connectStripe(v.id)}
+                            disabled={connectingStripeId === v.id}
+                          >
+                            {connectingStripeId === v.id ? "Opening Stripe…" : "Complete / re-open setup"}
+                          </button>
                         </div>
                       ) : (
                         <button
