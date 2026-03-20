@@ -237,6 +237,7 @@ const GlobalStyles = () => (
     .confirm-screen { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px; padding: 40px; text-align: center; }
     .confirm-icon { font-size: 80px; animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
     @keyframes popIn { 0% { transform: scale(0); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
     .confirm-heading { font-family: ${DS.font.display}; font-size: 56px; letter-spacing: 0.06em; color: ${DS.colors.accent}; }
     .order-id { font-family: ${DS.font.mono}; font-size: 24px; color: ${DS.colors.textSub}; letter-spacing: 0.1em; }
     .confirm-items { display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 320px; }
@@ -987,9 +988,70 @@ function KioskBrowse({ cart, onAddToCart, onRemoveFromCart, onCheckout, venueId,
 // KIOSK — AGE VERIFY (logs to Supabase)
 // ============================================================
 function KioskAgeVerify({ onVerified, onBack, onHome, kioskId }) {
+  // phases: choose | loading | yoti_sdk | manual_wait | success | failed
   const [phase, setPhase] = useState("choose");
   const [method, setMethod] = useState(null);
   const [verificationId, setVerificationId] = useState(null);
+  const [sessionId, setSessionId] = useState(null);
+  const [clientSessionToken, setClientSessionToken] = useState(null);
+  const [error, setError] = useState(null);
+  const pollRef = useRef(null);
+
+  // ── Polling — checks Yoti session state every 2s while SDK is active ────────
+  // TODO: Once Yoti account is active, verify state strings and pass/fail fields
+  //       match what yoti-poll-session returns for your chosen products.
+  useEffect(() => {
+    if (phase !== "yoti_sdk" || !sessionId) return;
+
+    const poll = async () => {
+      try {
+        const { data, error: fnErr } = await supabase.functions.invoke("yoti-poll-session", {
+          body: { session_id: sessionId },
+        });
+        if (fnErr) return; // transient — keep polling
+
+        if (data?.state === "COMPLETED") {
+          clearInterval(pollRef.current);
+          const passed = data.passed === true;
+          const vid = await logVerification(method, passed ? "pass" : "fail");
+          setVerificationId(vid);
+          setPhase(passed ? "success" : "failed");
+        } else if (data?.state === "EXPIRED" || data?.state === "ABANDONED") {
+          clearInterval(pollRef.current);
+          setError("Session expired. Please try again.");
+          setPhase("failed");
+        }
+      } catch (e) {
+        console.error("Yoti poll error:", e);
+      }
+    };
+
+    pollRef.current = setInterval(poll, 2000);
+    return () => clearInterval(pollRef.current);
+  }, [phase, sessionId]);
+
+  // ── TODO: Yoti web SDK initialisation ───────────────────────────────────────
+  // Once you have Yoti credentials, initialise their web SDK here when phase === "yoti_sdk".
+  // The SDK renders its own camera / QR UI into #yoti-verification-container.
+  //
+  // Likely pattern (confirm exact API from Yoti docs / Hub integration guide):
+  //   useEffect(() => {
+  //     if (phase !== "yoti_sdk" || !clientSessionToken) return;
+  //     const script = document.createElement("script");
+  //     script.src = "https://www.yoti.com/share/client/";  // TODO: confirm URL
+  //     script.onload = () => {
+  //       window.Yoti.createVerification({
+  //         clientSdkId: import.meta.env.VITE_YOTI_CLIENT_SDK_ID,
+  //         sessionId,
+  //         containerId: "yoti-verification-container",
+  //         onSuccess: () => { /* polling will catch the COMPLETED state */ },
+  //         onError:   (err) => { setError(err.message); setPhase("failed"); },
+  //       });
+  //     };
+  //     document.body.appendChild(script);
+  //     return () => document.body.removeChild(script);
+  //   }, [phase, clientSessionToken]);
+  // ────────────────────────────────────────────────────────────────────────────
 
   const logVerification = async (methodName, result) => {
     try {
@@ -1012,14 +1074,36 @@ function KioskAgeVerify({ onVerified, onBack, onHome, kioskId }) {
     }
   };
 
+  // Maps UI method labels → edge function method keys
+  const METHOD_MAP = {
+    "Driving Licence": "doc_scan_driving_licence",
+    "Passport":        "doc_scan_passport",
+    "Yoti":            "yoti_digital_id",
+    "AI Camera":       "age_scan",
+  };
+
   const startScan = async (m) => {
     setMethod(m);
-    setPhase("scanning");
-    setTimeout(async () => {
-      const vid = await logVerification(m, "pass");
-      setVerificationId(vid);
-      setPhase("success");
-    }, 3000);
+    setPhase("loading");
+    setError(null);
+
+    try {
+      const { data, error: fnErr } = await supabase.functions.invoke("yoti-create-session", {
+        body: { method: METHOD_MAP[m] ?? "age_scan" },
+      });
+
+      if (fnErr || !data?.session_id) {
+        throw new Error(fnErr?.message || "Failed to create Yoti session");
+      }
+
+      setSessionId(data.session_id);
+      setClientSessionToken(data.client_session_token);
+      setPhase("yoti_sdk");
+    } catch (e) {
+      console.error("Yoti session creation error:", e);
+      setError(e.message || "Could not start verification. Please try another method or ask staff.");
+      setPhase("failed");
+    }
   };
 
   const manualApproval = () => {
@@ -1034,6 +1118,7 @@ function KioskAgeVerify({ onVerified, onBack, onHome, kioskId }) {
 
   const navButtons = <KioskNav onBack={phase === "choose" ? onBack : undefined} onHome={onHome} showBack={phase === "choose"} />;
 
+  // ── Phase: success ────────────────────────────────────────────────────────
   if (phase === "success") {
     return (
       <div className="age-verify-screen" style={{ position: "relative" }}>
@@ -1046,6 +1131,26 @@ function KioskAgeVerify({ onVerified, onBack, onHome, kioskId }) {
     );
   }
 
+  // ── Phase: failed ─────────────────────────────────────────────────────────
+  if (phase === "failed") {
+    return (
+      <div className="age-verify-screen" style={{ position: "relative" }}>
+        {navButtons}
+        <div style={{ color: DS.colors.danger }}><XCircle size={80} strokeWidth={1.5} /></div>
+        <div className="age-heading" style={{ color: DS.colors.danger }}>VERIFICATION FAILED</div>
+        <div className="age-sub">{error || "We could not verify your age. Please try another method or ask a member of staff."}</div>
+        <button
+          className="btn-primary"
+          style={{ background: DS.colors.card, border: `1px solid ${DS.colors.border}`, color: DS.colors.text }}
+          onClick={() => { setPhase("choose"); setError(null); }}
+        >
+          TRY AGAIN
+        </button>
+      </div>
+    );
+  }
+
+  // ── Phase: manual_wait ────────────────────────────────────────────────────
   if (phase === "manual_wait") {
     return (
       <div className="age-verify-screen" style={{ position: "relative" }}>
@@ -1062,21 +1167,57 @@ function KioskAgeVerify({ onVerified, onBack, onHome, kioskId }) {
     );
   }
 
-  if (phase === "scanning") {
+  // ── Phase: loading ────────────────────────────────────────────────────────
+  if (phase === "loading") {
     return (
       <div className="age-verify-screen" style={{ position: "relative" }}>
         {navButtons}
-        <div className="age-heading">SCANNING {method?.toUpperCase()}</div>
+        <div className="age-heading">STARTING VERIFICATION</div>
         <div className="scanning-animation">
           <div className="scan-line" />
-          <div style={{ color: DS.colors.accent }}>{method === "Yoti" ? <Smartphone size={40} /> : method === "Passport" ? <BookOpen size={40} /> : <CreditCard size={40} />}</div>
-          <div className="scan-text">Reading document…</div>
+          <div style={{ color: DS.colors.accent, zIndex: 1, animation: "spin 1s linear infinite" }}>
+            <Loader2 size={40} strokeWidth={1.5} />
+          </div>
+          <div className="scan-text">Connecting to Yoti…</div>
         </div>
-        <div className="age-sub">Hold still and follow on-screen instructions</div>
       </div>
     );
   }
 
+  // ── Phase: yoti_sdk ───────────────────────────────────────────────────────
+  // Container for the Yoti web SDK. The SDK renders its camera / QR UI here.
+  // Polling (above) watches for COMPLETED state while the SDK is active.
+  // TODO: Add the Yoti SDK useEffect (commented out above) once credentials are ready.
+  if (phase === "yoti_sdk") {
+    return (
+      <div className="age-verify-screen" style={{ position: "relative" }}>
+        {navButtons}
+        <div className="age-heading">VERIFY YOUR AGE</div>
+        <div className="age-sub">Follow the instructions below</div>
+        <div
+          id="yoti-verification-container"
+          style={{
+            width: "100%",
+            maxWidth: 480,
+            minHeight: 320,
+            borderRadius: 16,
+            border: `1px solid ${DS.colors.border}`,
+            background: DS.colors.card,
+            overflow: "hidden",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          {/* Yoti SDK renders into this div once initialised */}
+          <div style={{ color: DS.colors.textMuted, fontSize: 13 }}>Initialising Yoti…</div>
+        </div>
+        <div style={{ fontSize: 12, color: DS.colors.textMuted }}>Session active • waiting for result…</div>
+      </div>
+    );
+  }
+
+  // ── Phase: choose (default) ───────────────────────────────────────────────
   return (
     <div className="age-verify-screen" style={{ position: "relative" }}>
       {navButtons}
@@ -1085,9 +1226,9 @@ function KioskAgeVerify({ onVerified, onBack, onHome, kioskId }) {
       <div className="verify-options">
         {[
           { m: "Driving Licence", icon: CreditCard,  desc: "Scan UK driving licence barcode" },
-          { m: "Passport",        icon: BookOpen,   desc: "Scan passport MRZ" },
-          { m: "Yoti",            icon: Smartphone, desc: "Show Yoti QR code" },
-          { m: "AI Camera",       icon: Camera,     desc: "Camera facial analysis" },
+          { m: "Passport",        icon: BookOpen,    desc: "Scan passport MRZ" },
+          { m: "Yoti",            icon: Smartphone,  desc: "Show Yoti QR code" },
+          { m: "AI Camera",       icon: Camera,      desc: "Camera facial analysis" },
         ].map(v => (
           <div key={v.m} className="verify-option" onClick={() => startScan(v.m)}>
             <div className="verify-icon" style={{ color: DS.colors.accent }}><v.icon size={52} strokeWidth={1.5} /></div>
@@ -1106,11 +1247,69 @@ function KioskAgeVerify({ onVerified, onBack, onHome, kioskId }) {
 }
 
 // ============================================================
+// KIOSK — CARD FORM (needs Elements context with clientSecret)
+// ============================================================
+function CardForm({ total, onPaid, orderId, clientSecret, phase, setPhase }) {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [cardError, setCardError] = useState(null);
+
+  const cardStyle = {
+    base: {
+      color: DS.colors.text,
+      fontFamily: DS.font.body,
+      fontSize: "16px",
+      "::placeholder": { color: DS.colors.textMuted },
+      iconColor: DS.colors.accent,
+    },
+    invalid: { color: DS.colors.danger },
+  };
+
+  const handlePay = async () => {
+    if (!stripe || !elements || phase !== "waiting") return;
+    setPhase("processing");
+    setCardError(null);
+    const card = elements.getElement(CardElement);
+    const { error: confirmError } = await stripe.confirmCardPayment(clientSecret, {
+      payment_method: { card },
+    });
+    if (confirmError) {
+      setCardError(confirmError.message);
+      setPhase("waiting");
+    } else {
+      setPhase("done");
+      setTimeout(() => onPaid(orderId), 1500);
+    }
+  };
+
+  return (
+    <div style={{ margin: "0 20px", display: "flex", flexDirection: "column", gap: 16 }}>
+      {cardError && <div className="error-banner">{cardError}</div>}
+      <div style={{ background: DS.colors.card, border: `1px solid ${DS.colors.border}`, borderRadius: 12, padding: "18px 20px" }}>
+        <CardElement options={{ style: cardStyle, hidePostalCode: true }} />
+      </div>
+      <button
+        className="btn-accent"
+        style={{ width: "100%", padding: "14px", fontSize: 16, fontWeight: 700, borderRadius: 10, cursor: phase === "processing" ? "default" : "pointer" }}
+        onClick={handlePay}
+        disabled={phase === "processing" || !stripe}
+      >
+        {phase === "processing"
+          ? <span style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "center" }}><Loader2 size={18} style={{ animation: "spin 1s linear infinite" }} /> Processing…</span>
+          : `Pay ${fmt(total)}`}
+      </button>
+      <div className="pay-methods" style={{ justifyContent: "center" }}>
+        {["Visa", "Mastercard", "Amex"].map(m => <div key={m} className="pay-method">{m}</div>)}
+      </div>
+      <div style={{ fontSize: 13, color: DS.colors.textMuted, textAlign: "center" }}>Powered by Stripe · PCI DSS Compliant · End-to-end encrypted</div>
+    </div>
+  );
+}
+
+// ============================================================
 // KIOSK — PAYMENT (Stripe Elements)
 // ============================================================
 function KioskPaymentInner({ cart, products, onPaid, onBack, onHome, verificationId, kioskId, venueId }) {
-  const stripe = useStripe();
-  const elements = useElements();
   const [phase, setPhase] = useState("loading"); // loading | waiting | processing | done | error
   const [orderId, setOrderId] = useState(null);
   const [clientSecret, setClientSecret] = useState(null);
@@ -1190,34 +1389,6 @@ function KioskPaymentInner({ cart, products, onPaid, onBack, onHome, verificatio
     init();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handlePay = async () => {
-    if (!stripe || !elements || phase !== "waiting") return;
-    setPhase("processing");
-    setError(null);
-    const card = elements.getElement(CardElement);
-    const { error: confirmError } = await stripe.confirmCardPayment(clientSecret, {
-      payment_method: { card },
-    });
-    if (confirmError) {
-      setError(confirmError.message);
-      setPhase("waiting");
-    } else {
-      setPhase("done");
-      setTimeout(() => onPaid(orderId), 1500);
-    }
-  };
-
-  const cardStyle = {
-    base: {
-      color: DS.colors.text,
-      fontFamily: DS.font.body,
-      fontSize: "16px",
-      "::placeholder": { color: DS.colors.textMuted },
-      iconColor: DS.colors.accent,
-    },
-    invalid: { color: DS.colors.danger },
-  };
-
   return (
     <div className="payment-screen" style={{ position: "relative" }}>
       <KioskNav onBack={phase === "waiting" ? onBack : undefined} onHome={phase !== "done" ? onHome : undefined} showBack={phase === "waiting"} />
@@ -1250,36 +1421,16 @@ function KioskPaymentInner({ cart, products, onPaid, onBack, onHome, verificatio
       )}
 
       {(phase === "waiting" || phase === "processing") && clientSecret && (
-        <div style={{ margin: "0 20px", display: "flex", flexDirection: "column", gap: 16 }}>
-          <div style={{ background: DS.colors.card, border: `1px solid ${DS.colors.border}`, borderRadius: 12, padding: "18px 20px" }}>
-            <CardElement options={{ style: cardStyle, hidePostalCode: true }} />
-          </div>
-          <button
-            className="btn-accent"
-            style={{ width: "100%", padding: "14px", fontSize: 16, fontWeight: 700, borderRadius: 10, cursor: phase === "processing" ? "default" : "pointer" }}
-            onClick={handlePay}
-            disabled={phase === "processing" || !stripe}
-          >
-            {phase === "processing"
-              ? <span style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "center" }}><Loader2 size={18} style={{ animation: "spin 1s linear infinite" }} /> Processing…</span>
-              : `Pay ${fmt(total)}`}
-          </button>
-          <div className="pay-methods" style={{ justifyContent: "center" }}>
-            {["Visa", "Mastercard", "Amex"].map(m => <div key={m} className="pay-method">{m}</div>)}
-          </div>
-          <div style={{ fontSize: 13, color: DS.colors.textMuted, textAlign: "center" }}>Powered by Stripe · PCI DSS Compliant · End-to-end encrypted</div>
-        </div>
+        <Elements stripe={stripePromise} options={{ clientSecret, disableLink: true }}>
+          <CardForm total={total} onPaid={onPaid} orderId={orderId} clientSecret={clientSecret} phase={phase} setPhase={setPhase} />
+        </Elements>
       )}
     </div>
   );
 }
 
 function KioskPayment(props) {
-  return (
-    <Elements stripe={stripePromise} options={{ disableLink: true }}>
-      <KioskPaymentInner {...props} />
-    </Elements>
-  );
+  return <KioskPaymentInner {...props} />;
 }
 
 // ============================================================
