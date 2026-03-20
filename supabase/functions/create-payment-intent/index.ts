@@ -67,8 +67,7 @@ Deno.serve(async (req: Request) => {
     const paymentIntent = await stripe.paymentIntents.create({
       amount: totalPence,
       currency: "gbp",
-      // transfer_data disabled until connected account has transfers capability active
-      // transfer_data: { destination: venue.stripe_account_id, amount: transferAmount },
+      transfer_data: { destination: venue.stripe_account_id, amount: transferAmount },
       metadata: { venue_id, ...(order_id ? { order_id } : {}) },
     });
 
