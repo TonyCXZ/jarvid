@@ -5581,13 +5581,25 @@ function LoginScreen({ onLogin, onBack }) {
 }
 
 // ─── VenuePicker ─────────────────────────────────────────────────────────────
-function VenuePicker() {
+function VenuePicker({ user }) {
+  const navigate = useNavigate();
   const [venues, setVenues] = useState([]);
 
   useEffect(() => {
-    supabase.from("venues").select("name, slug").order("name")
-      .then(({ data }) => setVenues(data || []));
-  }, []);
+    const isOrgAdmin = user?.role === "org_admin";
+    let query = supabase.from("venues").select("name, slug").order("name");
+    if (isOrgAdmin && user?.org_id) query = query.eq("org_id", user.org_id);
+
+    query.then(({ data }) => {
+      const list = data || [];
+      // If org admin only has one venue, go straight there — no need to pick
+      if (isOrgAdmin && list.length === 1) {
+        navigate(`/${list[0].slug}/staff`, { replace: true });
+      } else {
+        setVenues(list);
+      }
+    });
+  }, [user, navigate]);
 
   return (
     <>
@@ -5667,7 +5679,7 @@ function RootPage() {
 
   const isSuperAdmin = user?.role === "super_admin" || (user && !user.venue_id);
 
-  if (user && isSuperAdmin) return <VenuePicker />;
+  if (user && isSuperAdmin) return <VenuePicker user={user} />;
 
   // Not authenticated — show login
   const handleLogin = (loggedInUser) => {
