@@ -15,7 +15,7 @@ import {
   LayoutDashboard, TrendingUp, Package, Warehouse, Shield, Users, Download, Settings,
   FileText,
   Building2, Network, ShoppingCart, Monitor, PoundSterling,
-  MapPin, Tablet, Circle,
+  MapPin, Tablet, Circle, HardDrive, Upload, Receipt,
 } from "lucide-react";
 
 // ============================================================
@@ -410,7 +410,7 @@ const GlobalStyles = () => (
     .auth-card { width: 420px; padding: 52px 44px; background: ${DS.colors.surface}; border: 1px solid ${DS.colors.border}; border-radius: 22px; display: flex; flex-direction: column; gap: 28px; box-shadow: 0 24px 64px rgba(0,0,0,0.6); }
     .auth-logo { font-family: 'Bebas Neue', sans-serif; font-size: 52px; letter-spacing: 0.08em; color: white; text-align: center; line-height: 1; }
     .auth-logo span { color: #f0a830; text-shadow: 0 0 32px rgba(240,168,48,0.5); }
-    .auth-subtitle { font-size: 13px; color: #9a9080; text-align: center; margin-top: -20px; letter-spacing: 0.06em; text-transform: uppercase; }
+    .auth-subtitle { font-size: 13px; color: #9a9080; text-align: center; letter-spacing: 0.06em; text-transform: uppercase; }
     .auth-form { display: flex; flex-direction: column; gap: 16px; }
     .auth-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #9a9080; font-weight: 600; margin-bottom: 4px; }
     .auth-input { width: 100%; padding: 14px 16px; border-radius: 10px; background: #1d1a16; border: 1px solid #312c24; color: #f2ede4; font-size: 15px; outline: none; font-family: 'Outfit', sans-serif; transition: border-color 0.15s; }
@@ -4034,6 +4034,16 @@ function AdminView() {
   const [editingBilling, setEditingBilling] = useState(null);
   const [billingFormData, setBillingFormData] = useState({});
 
+  // Hardware Assets
+  const [assets, setAssets] = useState([]);
+  const [loadingAssets, setLoadingAssets] = useState(false);
+  const [assetForm, setAssetForm] = useState(null);
+  const [assetFormData, setAssetFormData] = useState({});
+  const [savingAsset, setSavingAsset] = useState(false);
+  const [assetVenueFilter, setAssetVenueFilter] = useState("all");
+  const [assetStatusFilter, setAssetStatusFilter] = useState("all");
+  const [uploadingReceipt, setUploadingReceipt] = useState(false);
+
   // Load venues, orgs and platform settings on mount
   useEffect(() => { loadVenues(); loadOrgs(); loadPlatformSettings(); }, []);
 
@@ -4044,11 +4054,16 @@ function AdminView() {
     if (adminSection === "purchasing") loadPurchasing();
     if (adminSection === "financials") loadFinancials();
     if (adminSection === "billing") loadBilling();
+    if (adminSection === "hardware") loadAssets();
   }, [adminSection]);
 
   useEffect(() => {
     if (adminSection === "stock") loadInventory();
   }, [stockVenueId]);
+
+  useEffect(() => {
+    if (adminSection === "hardware") loadAssets();
+  }, [assetVenueFilter, assetStatusFilter]);
 
   // --- Shared styles ---
   const inputStyle = { background: DS.colors.surface, border: `1px solid ${DS.colors.border}`, borderRadius: 6, padding: "7px 10px", color: DS.colors.text, fontSize: 13, fontFamily: DS.font.body, outline: "none", width: "100%" };
@@ -4540,6 +4555,69 @@ function AdminView() {
     loadOrgs(); loadVenues();
   };
 
+  // --- Hardware Assets ---
+  const loadAssets = async () => {
+    setLoadingAssets(true);
+    let q = supabase.from("venue_hardware_assets")
+      .select("*, venues(name)")
+      .order("created_at", { ascending: false });
+    if (assetVenueFilter === "unassigned") q = q.is("venue_id", null);
+    else if (assetVenueFilter !== "all") q = q.eq("venue_id", assetVenueFilter);
+    if (assetStatusFilter !== "all") q = q.eq("status", assetStatusFilter);
+    const { data, error } = await q;
+    if (!error) setAssets(data || []);
+    setLoadingAssets(false);
+  };
+
+  const saveAsset = async () => {
+    setSavingAsset(true);
+    const d = assetFormData;
+    const payload = {
+      venue_id: d.venue_id || null,
+      asset_type: d.asset_type || "tablet_customer",
+      make: d.make || null,
+      model: d.model || null,
+      serial_number: d.serial_number || null,
+      purchase_date: d.purchase_date || null,
+      purchase_price_pence: d.purchase_price_pounds ? Math.round(parseFloat(d.purchase_price_pounds) * 100) : 0,
+      supplier: d.supplier || null,
+      status: d.status || "deployed",
+      notes: d.notes || null,
+    };
+    if (assetForm.mode === "new") {
+      const { error } = await supabase.from("venue_hardware_assets").insert(payload);
+      if (!error) { setAssetForm(null); loadAssets(); } else alert("Error: " + error.message);
+    } else {
+      const { error } = await supabase.from("venue_hardware_assets").update(payload).eq("id", assetForm.id);
+      if (error) alert("Error: " + error.message);
+      else { setAssetForm(null); loadAssets(); }
+    }
+    setSavingAsset(false);
+  };
+
+  const deleteAsset = async (id) => {
+    if (!window.confirm("Delete this asset record? This cannot be undone.")) return;
+    await supabase.from("venue_hardware_assets").delete().eq("id", id);
+    loadAssets();
+  };
+
+  const uploadReceipt = async (file, assetId) => {
+    setUploadingReceipt(assetId);
+    const ext = file.name.split(".").pop().toLowerCase();
+    const path = `${assetId}/${Date.now()}.${ext}`;
+    const { error: uploadErr } = await supabase.storage.from("hardware-receipts").upload(path, file, { upsert: true });
+    if (uploadErr) { alert("Upload failed: " + uploadErr.message); setUploadingReceipt(false); return; }
+    await supabase.from("venue_hardware_assets").update({ receipt_url: path }).eq("id", assetId);
+    setUploadingReceipt(false);
+    loadAssets();
+  };
+
+  const viewReceipt = async (receiptPath) => {
+    const { data, error } = await supabase.storage.from("hardware-receipts").createSignedUrl(receiptPath, 300);
+    if (error) { alert("Could not load receipt: " + error.message); return; }
+    window.open(data.signedUrl, "_blank");
+  };
+
   const navItems = [
     { id: "venues",        icon: Building2,      label: "Venues" },
     { id: "organisations", icon: Network,        label: "Organisations" },
@@ -4547,6 +4625,7 @@ function AdminView() {
     { id: "stock",      icon: Package,        label: "Stock" },
     { id: "purchasing", icon: ShoppingCart,   label: "Purchasing" },
     { id: "devices",    icon: Monitor,        label: "Devices" },
+    { id: "hardware",   icon: HardDrive,      label: "Hardware" },
     { id: "financials", icon: PoundSterling,  label: "Financials" },
     { id: "billing",    icon: CreditCard,     label: "Billing" },
     { id: "settings",   icon: Settings,       label: "Settings" },
@@ -5290,6 +5369,190 @@ function AdminView() {
 
         {/* ===== DEVICES ===== */}
         {adminSection === "devices" && <DeviceMonitor venues={venues} />}
+
+        {/* ===== HARDWARE ASSETS ===== */}
+        {adminSection === "hardware" && (
+          <>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div>
+                <div className="section-title">HARDWARE ASSETS</div>
+                <div className="section-sub">Company-owned equipment deployed at venues · {assets.length} assets</div>
+              </div>
+              <button className="btn-sm btn-accent" onClick={() => { setAssetForm({ mode: "new" }); setAssetFormData({ status: "deployed", asset_type: "tablet_customer" }); }}>+ Add Asset</button>
+            </div>
+
+            {/* Filters */}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <select style={{ ...inputStyle, width: "auto" }} value={assetVenueFilter} onChange={e => setAssetVenueFilter(e.target.value)}>
+                <option value="all">All venues</option>
+                <option value="unassigned">In stock / unassigned</option>
+                {venues.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+              </select>
+              {["all", "deployed", "spare", "faulty", "retired"].map(s => (
+                <button key={s} className="btn-sm btn-outline"
+                  style={{ color: assetStatusFilter === s ? DS.colors.accent : DS.colors.textSub, borderColor: assetStatusFilter === s ? DS.colors.accent : DS.colors.border }}
+                  onClick={() => setAssetStatusFilter(s)}>
+                  {s === "all" ? "All statuses" : s.charAt(0).toUpperCase() + s.slice(1)}
+                </button>
+              ))}
+            </div>
+
+            {/* Stats */}
+            <div className="stats-row">
+              <div className="stat-card">
+                <div className="stat-label">Total Assets</div>
+                <div className="stat-value">{assets.length}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Total Hardware Cost</div>
+                <div className="stat-value">{fmt(penceToGBP(assets.reduce((s, a) => s + (a.purchase_price_pence || 0), 0)))}</div>
+                <div className="stat-sub">Ex. VAT</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Deployed</div>
+                <div className="stat-value" style={{ color: DS.colors.accent }}>{assets.filter(a => a.status === "deployed").length}</div>
+                <div className="stat-sub">{assets.filter(a => a.status === "spare").length} spare · {assets.filter(a => a.status === "faulty").length} faulty</div>
+              </div>
+            </div>
+
+            {/* Add / Edit Form */}
+            {assetForm && (
+              <div style={{ background: DS.colors.card, border: `1px solid ${DS.colors.border}`, borderRadius: 10, padding: 20 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 16 }}>{assetForm.mode === "new" ? "Add Hardware Asset" : "Edit Asset"}</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <div style={fieldStyle}>
+                    <div style={labelStyle}>Asset Type *</div>
+                    <select style={inputStyle} value={assetFormData.asset_type || "tablet_customer"} onChange={e => setAssetFormData(d => ({ ...d, asset_type: e.target.value }))}>
+                      <option value="tablet_customer">Customer Tablet</option>
+                      <option value="tablet_staff">Staff Tablet</option>
+                      <option value="payment_terminal">Payment Terminal</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
+                  <div style={fieldStyle}>
+                    <div style={labelStyle}>Venue</div>
+                    <select style={inputStyle} value={assetFormData.venue_id || ""} onChange={e => setAssetFormData(d => ({ ...d, venue_id: e.target.value }))}>
+                      <option value="">— In stock / unassigned —</option>
+                      {venues.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                    </select>
+                  </div>
+                  <div style={fieldStyle}>
+                    <div style={labelStyle}>Make</div>
+                    <input style={inputStyle} value={assetFormData.make || ""} onChange={e => setAssetFormData(d => ({ ...d, make: e.target.value }))} placeholder="Samsung" />
+                  </div>
+                  <div style={fieldStyle}>
+                    <div style={labelStyle}>Model</div>
+                    <input style={inputStyle} value={assetFormData.model || ""} onChange={e => setAssetFormData(d => ({ ...d, model: e.target.value }))} placeholder="Galaxy Tab A7" />
+                  </div>
+                  <div style={fieldStyle}>
+                    <div style={labelStyle}>Serial Number</div>
+                    <input style={inputStyle} value={assetFormData.serial_number || ""} onChange={e => setAssetFormData(d => ({ ...d, serial_number: e.target.value }))} placeholder="R52R300XXXX" />
+                  </div>
+                  <div style={fieldStyle}>
+                    <div style={labelStyle}>Supplier</div>
+                    <input style={inputStyle} value={assetFormData.supplier || ""} onChange={e => setAssetFormData(d => ({ ...d, supplier: e.target.value }))} placeholder="Amazon, Samsung, Stripe…" />
+                  </div>
+                  <div style={fieldStyle}>
+                    <div style={labelStyle}>Purchase Date</div>
+                    <input style={inputStyle} type="date" value={assetFormData.purchase_date || ""} onChange={e => setAssetFormData(d => ({ ...d, purchase_date: e.target.value }))} />
+                  </div>
+                  <div style={fieldStyle}>
+                    <div style={labelStyle}>Purchase Price (£, ex VAT)</div>
+                    <input style={inputStyle} type="number" step="0.01" min="0" value={assetFormData.purchase_price_pounds || ""} onChange={e => setAssetFormData(d => ({ ...d, purchase_price_pounds: e.target.value }))} placeholder="199.99" />
+                  </div>
+                  <div style={fieldStyle}>
+                    <div style={labelStyle}>Status</div>
+                    <select style={inputStyle} value={assetFormData.status || "deployed"} onChange={e => setAssetFormData(d => ({ ...d, status: e.target.value }))}>
+                      <option value="deployed">Deployed</option>
+                      <option value="spare">Spare</option>
+                      <option value="faulty">Faulty</option>
+                      <option value="retired">Retired</option>
+                    </select>
+                  </div>
+                  <div style={{ ...fieldStyle, gridColumn: "span 2" }}>
+                    <div style={labelStyle}>Notes</div>
+                    <input style={inputStyle} value={assetFormData.notes || ""} onChange={e => setAssetFormData(d => ({ ...d, notes: e.target.value }))} placeholder="e.g. Purchased for The Crown opening kit" />
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+                  <button className="btn-sm btn-accent" onClick={saveAsset} disabled={savingAsset}>{savingAsset ? "Saving…" : "Save Asset"}</button>
+                  <button className="btn-sm btn-outline" onClick={() => setAssetForm(null)}>Cancel</button>
+                </div>
+              </div>
+            )}
+
+            {/* Assets Table */}
+            <div className="chart-card" style={{ padding: 0, overflow: "hidden" }}>
+              {loadingAssets ? (
+                <div style={{ display: "flex", justifyContent: "center", padding: 40 }}><div className="spinner" /></div>
+              ) : assets.length === 0 ? (
+                <div style={{ color: DS.colors.textMuted, fontSize: 13, textAlign: "center", padding: 40 }}>
+                  No assets recorded. Click "+ Add Asset" to log your first kit.
+                </div>
+              ) : (
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Type</th>
+                      <th>Make / Model</th>
+                      <th>Serial No.</th>
+                      <th>Venue</th>
+                      <th>Purchased</th>
+                      <th>Cost (ex VAT)</th>
+                      <th>Status</th>
+                      <th>Receipt</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {assets.map(a => {
+                      const typeLabel = { tablet_customer: "Customer Tablet", tablet_staff: "Staff Tablet", payment_terminal: "Payment Terminal", other: "Other" }[a.asset_type] || a.asset_type;
+                      const statusStyle = { deployed: { bg: DS.colors.accentGlow, fg: DS.colors.accent }, spare: { bg: "rgba(59,130,246,0.12)", fg: DS.colors.blue }, faulty: { bg: DS.colors.dangerGlow, fg: DS.colors.danger }, retired: { bg: "rgba(255,255,255,0.05)", fg: DS.colors.textMuted } }[a.status] || { bg: "rgba(255,255,255,0.05)", fg: DS.colors.textMuted };
+                      return (
+                        <tr key={a.id}>
+                          <td style={{ fontSize: 13 }}>{typeLabel}</td>
+                          <td style={{ fontSize: 13 }}>{[a.make, a.model].filter(Boolean).join(" ") || <span style={{ color: DS.colors.textMuted }}>—</span>}</td>
+                          <td style={{ fontSize: 12, color: DS.colors.textMuted, fontFamily: "monospace" }}>{a.serial_number || "—"}</td>
+                          <td style={{ fontSize: 13 }}>{a.venues?.name || <span style={{ color: DS.colors.textMuted, fontStyle: "italic" }}>In stock</span>}</td>
+                          <td style={{ fontSize: 12, color: DS.colors.textSub }}>{a.purchase_date ? new Date(a.purchase_date).toLocaleDateString("en-GB") : "—"}</td>
+                          <td style={{ fontSize: 13, fontWeight: 600 }}>{a.purchase_price_pence != null ? fmt(penceToGBP(a.purchase_price_pence)) : "—"}</td>
+                          <td>
+                            <span className="tag-pill" style={{ background: statusStyle.bg, color: statusStyle.fg }}>
+                              {a.status}
+                            </span>
+                          </td>
+                          <td>
+                            {a.receipt_url ? (
+                              <button className="btn-sm btn-outline" style={{ fontSize: 11, display: "flex", alignItems: "center", gap: 4 }} onClick={() => viewReceipt(a.receipt_url)}>
+                                <Receipt size={11} /> View
+                              </button>
+                            ) : (
+                              <label style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                                <span className="btn-sm btn-outline" style={{ fontSize: 11, opacity: uploadingReceipt === a.id ? 0.5 : 1, display: "flex", alignItems: "center", gap: 4, pointerEvents: "none" }}>
+                                  <Upload size={11} /> {uploadingReceipt === a.id ? "Uploading…" : "Upload"}
+                                </span>
+                                <input type="file" accept="image/*,.pdf" style={{ display: "none" }} disabled={uploadingReceipt === a.id} onChange={e => { if (e.target.files[0]) uploadReceipt(e.target.files[0], a.id); }} />
+                              </label>
+                            )}
+                          </td>
+                          <td>
+                            <div style={{ display: "flex", gap: 6 }}>
+                              <button className="btn-sm btn-outline" style={{ fontSize: 11 }} onClick={() => {
+                                setAssetForm({ mode: "edit", id: a.id });
+                                setAssetFormData({ ...a, purchase_price_pounds: a.purchase_price_pence != null ? (a.purchase_price_pence / 100).toFixed(2) : "", venue_id: a.venue_id || "" });
+                              }}>Edit</button>
+                              <button className="btn-sm btn-outline" style={dangerBtnStyle} onClick={() => deleteAsset(a.id)}>Delete</button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </>
+        )}
 
         {/* ===== FINANCIALS ===== */}
         {adminSection === "financials" && (
