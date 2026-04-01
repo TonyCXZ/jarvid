@@ -5133,6 +5133,39 @@ function AdminView() {
                         }}>Save</button>
                       </div>
                     </div>
+                    <div style={{ marginBottom: 10 }}>
+                      <div style={{ fontSize: 11, color: DS.colors.textMuted, marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.06em" }}>Setup Code</div>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          maxLength={6}
+                          defaultValue={v.setup_code || ""}
+                          key={`sc-${v.id}`}
+                          id={`sc-${v.id}`}
+                          placeholder="——————"
+                          style={{ background: DS.colors.surface, border: `1px solid ${DS.colors.border}`, borderRadius: 6, padding: "6px 10px", color: DS.colors.accent, fontSize: 16, fontFamily: DS.font.display, fontWeight: 700, width: 90, outline: "none", letterSpacing: "0.15em" }}
+                          onChange={e => e.target.value = e.target.value.replace(/\D/g, "")}
+                        />
+                        <button className="btn-sm btn-accent" onClick={async () => {
+                          const input = document.getElementById(`sc-${v.id}`);
+                          const newCode = input?.value;
+                          if (!newCode || newCode.length !== 6) { alert("Setup code must be exactly 6 digits"); return; }
+                          const { error } = await supabase.from("venues").update({ setup_code: newCode }).eq("id", v.id);
+                          if (error?.code === "23505") { alert("This code is already used by another venue — choose a different one"); }
+                          else if (!error) { input.style.borderColor = DS.colors.accent; setTimeout(() => input.style.borderColor = DS.colors.border, 2000); loadVenues(); }
+                        }}>Save</button>
+                        <button className="btn-sm btn-outline" onClick={async () => {
+                          const newCode = String(Math.floor(100000 + Math.random() * 900000));
+                          const { error } = await supabase.from("venues").update({ setup_code: newCode }).eq("id", v.id);
+                          if (error?.code === "23505") { alert("Generated code already taken — try again"); }
+                          else if (!error) { loadVenues(); }
+                        }}>Regen</button>
+                      </div>
+                      <div style={{ fontSize: 11, color: DS.colors.textMuted, marginTop: 4 }}>
+                        Used for device provisioning and re-provisioning
+                      </div>
+                    </div>
                     <div style={{ marginBottom: 4 }}>
                       {v.stripe_account_id ? (
                         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
