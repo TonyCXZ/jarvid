@@ -6535,11 +6535,13 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/"                   element={<RootPage />} />
+        <Route path="/"                              element={<RootPage />} />
+        <Route path="/kiosk"                         element={<KioskRouteDevice />} />
+        <Route path="/staff"                         element={<StaffRouteDevice />} />
         <Route path="/:venueSlug/kiosk"              element={<KioskRoute />} />
-        <Route path="/:venueSlug/kiosk/:kioskSlug"  element={<KioskRoute />} />
-        <Route path="/:venueSlug/staff"   element={<StaffRoute />} />
-        <Route path="*"                   element={<VenueNotFound />} />
+        <Route path="/:venueSlug/kiosk/:kioskSlug"   element={<KioskRoute />} />
+        <Route path="/:venueSlug/staff"              element={<StaffRoute />} />
+        <Route path="*"                              element={<VenueNotFound />} />
       </Routes>
     </BrowserRouter>
   );
