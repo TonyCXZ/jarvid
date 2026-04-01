@@ -530,6 +530,87 @@ function useVenueFromDevice() {
   };
 }
 
+// ─── VenueSetup ──────────────────────────────────────────────────────────────
+// Full-screen 6-digit code entry for device provisioning.
+// Queries venues.setup_code to validate; on success writes localStorage.
+function VenueSetup({ onComplete }) {
+  const [code, setCode] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [shake, setShake] = useState(false);
+
+  const submit = async (c) => {
+    setSubmitting(true);
+    setError("");
+    const { data, error: err } = await supabase
+      .from("venues")
+      .select("id, slug, name")
+      .eq("setup_code", c)
+      .single();
+    setSubmitting(false);
+    if (err || !data) {
+      setError("Invalid code. Check with your administrator.");
+      setShake(true);
+      setTimeout(() => { setCode(""); setShake(false); }, 600);
+      return;
+    }
+    onComplete({ venueId: data.id, venueSlug: data.slug, venueLabel: data.name });
+  };
+
+  const handleKey = (key) => {
+    if (submitting) return;
+    if (key === "back") { setCode(c => c.slice(0, -1)); setError(""); return; }
+    if (key === "clear") { setCode(""); setError(""); return; }
+    if (code.length >= 6) return;
+    const next = code + key;
+    setCode(next);
+    if (next.length === 6) submit(next);
+  };
+
+  return (
+    <>
+      <GlobalStyles />
+      <div style={{
+        width: "100%", height: "100vh", display: "flex", flexDirection: "column",
+        alignItems: "center", justifyContent: "center",
+        background: DS.colors.bg, color: DS.colors.text, fontFamily: DS.font.body,
+        gap: 0,
+      }}>
+        <div style={{ fontFamily: DS.font.display, fontSize: 42, letterSpacing: "0.1em", color: DS.colors.accent, marginBottom: 6 }}>
+          JARV-ID
+        </div>
+        <div style={{ fontSize: 15, color: DS.colors.textSub, marginBottom: 40 }}>
+          Enter your 6-digit venue setup code
+        </div>
+        <div style={{ display: "flex", gap: 10, marginBottom: 8, animation: shake ? "shake 0.4s ease" : "none" }}>
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} style={{
+              width: 44, height: 56, borderRadius: 8, display: "flex", alignItems: "center",
+              justifyContent: "center", background: DS.colors.surface,
+              border: `2px solid ${code.length > i ? DS.colors.accent : DS.colors.border}`,
+              fontSize: 26, fontFamily: DS.font.display, color: DS.colors.accent,
+            }}>
+              {code[i] ? "•" : ""}
+            </div>
+          ))}
+        </div>
+        <div style={{ height: 24, display: "flex", alignItems: "center", marginBottom: 24 }}>
+          {error && <div style={{ color: DS.colors.danger, fontSize: 13 }}>{error}</div>}
+          {submitting && <div style={{ color: DS.colors.textSub, fontSize: 13 }}>Checking…</div>}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 72px)", gap: 10 }}>
+          {["1","2","3","4","5","6","7","8","9"].map(k => (
+            <button key={k} className="pin-key" onClick={() => handleKey(k)}>{k}</button>
+          ))}
+          <button className="pin-key" onClick={() => handleKey("clear")} style={{ fontSize: 13, color: DS.colors.textMuted }}>CLR</button>
+          <button className="pin-key" onClick={() => handleKey("0")}>0</button>
+          <button className="pin-key" onClick={() => handleKey("back")}><X size={16} /></button>
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ─── VenueNotFound ────────────────────────────────────────────────────────────
 function VenueNotFound() {
   return (
