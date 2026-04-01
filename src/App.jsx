@@ -611,6 +611,71 @@ function VenueSetup({ onComplete }) {
   );
 }
 
+// ─── useReprovisionEscape hook ───────────────────────────────────────────────
+// 5-tap logo trigger + 6-digit setup_code overlay → clears venue and reprovisions.
+function useReprovisionEscape(setupCode, reprovision) {
+  const [escapeActive, setEscapeActive] = useState(false);
+  const [escapeEntry, setEscapeEntry] = useState("");
+  const [escapeError, setEscapeError] = useState("");
+  const [escapeShake, setEscapeShake] = useState(false);
+  const tapCount = useRef(0);
+  const tapTimer = useRef(null);
+
+  // Call from a tap handler to count taps; triggers overlay after 5 within 2s
+  const handleEscapeTap = useCallback(() => {
+    tapCount.current += 1;
+    clearTimeout(tapTimer.current);
+    if (tapCount.current >= 5) {
+      tapCount.current = 0;
+      setEscapeActive(true);
+      setEscapeEntry("");
+      setEscapeError("");
+    } else {
+      tapTimer.current = setTimeout(() => { tapCount.current = 0; }, 2000);
+    }
+  }, []);
+
+  // Call directly (e.g., from StaffView's onUnlock) to show the overlay
+  const triggerEscape = useCallback(() => {
+    setEscapeActive(true);
+    setEscapeEntry("");
+    setEscapeError("");
+  }, []);
+
+  const handleEscapeKey = useCallback((key) => {
+    if (key === "clear") { setEscapeEntry(""); setEscapeError(""); return; }
+    if (key === "back") { setEscapeEntry(e => e.slice(0, -1)); setEscapeError(""); return; }
+    setEscapeEntry(prev => {
+      if (prev.length >= 6) return prev;
+      const next = prev + key;
+      if (next.length === 6) {
+        if (next === setupCode) {
+          setEscapeActive(false);
+          setEscapeEntry("");
+          reprovision();
+        } else {
+          setEscapeError("Invalid code.");
+          setEscapeShake(true);
+          setTimeout(() => { setEscapeEntry(""); setEscapeShake(false); setEscapeError(""); }, 600);
+        }
+        return "";
+      }
+      return next;
+    });
+  }, [setupCode, reprovision]);
+
+  const dismissEscape = useCallback(() => {
+    setEscapeActive(false);
+    setEscapeEntry("");
+    setEscapeError("");
+  }, []);
+
+  return {
+    escapeActive, escapeEntry, escapeError, escapeShake,
+    handleEscapeTap, triggerEscape, handleEscapeKey, dismissEscape,
+  };
+}
+
 // ─── VenueNotFound ────────────────────────────────────────────────────────────
 function VenueNotFound() {
   return (
