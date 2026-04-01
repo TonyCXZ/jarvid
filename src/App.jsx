@@ -134,8 +134,8 @@ const GlobalStyles = () => (
 
     /* ── Welcome screen ── */
     .welcome-screen { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 44px; padding: 40px; text-align: center; background: radial-gradient(ellipse 70% 50% at 50% 35%, rgba(240,168,48,0.09) 0%, transparent 65%), radial-gradient(ellipse 40% 30% at 20% 80%, rgba(168,85,247,0.04) 0%, transparent 60%); }
-    .welcome-logo { font-family: ${DS.font.display}; font-size: 80px; letter-spacing: 0.06em; color: ${DS.colors.white}; line-height: 1; }
-    .welcome-logo .glow { color: ${DS.colors.accent}; text-shadow: 0 0 50px rgba(240,168,48,0.5), 0 0 100px rgba(240,168,48,0.2); }
+    .welcome-logo { font-family: ${DS.font.display}; font-size: clamp(80px, 16vw, 180px); letter-spacing: 0.08em; color: ${DS.colors.white}; line-height: 1.05; text-shadow: 0 2px 24px rgba(0,0,0,0.8); }
+    .welcome-logo .glow { color: ${DS.colors.accent}; text-shadow: 0 0 60px rgba(240,168,48,0.7), 0 0 120px rgba(240,168,48,0.35), 0 2px 24px rgba(0,0,0,0.8); }
     .welcome-sub { font-size: 18px; color: ${DS.colors.textSub}; font-weight: 300; letter-spacing: 0.1em; text-transform: uppercase; }
     .welcome-age-notice { padding: 20px 32px; border: 1px solid ${DS.colors.warn}; border-radius: 12px; background: ${DS.colors.warnGlow}; color: ${DS.colors.warn}; font-size: 15px; font-weight: 500; letter-spacing: 0.01em; max-width: 520px; text-align: center; line-height: 1.8; }
     .btn-primary { padding: 22px 72px; border-radius: 14px; font-family: ${DS.font.display}; font-size: 32px; letter-spacing: 0.1em; background: ${DS.colors.accent}; color: ${DS.colors.bg}; border: none; cursor: pointer; box-shadow: 0 4px 48px rgba(240,168,48,0.45), 0 2px 12px rgba(0,0,0,0.4); transition: all 0.2s; text-transform: uppercase; }
@@ -454,6 +454,82 @@ function useVenue(slug) {
   return { venueId, loading, notFound };
 }
 
+// ─── useVenueFromDevice hook ──────────────────────────────────────────────────
+// Resolves venue for device routes (/kiosk, /staff) — no slug in the URL.
+// Waterfall: localStorage → ?venue= query param → VenueSetup code entry.
+const VENUE_CONFIG_KEY = "jarv-id:venue-config";
+
+function useVenueFromDevice() {
+  const [venueConfig, setVenueConfig] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [provisioning, setProvisioning] = useState(false);
+  const [epoch, setEpoch] = useState(0);
+
+  useEffect(() => {
+    setLoading(true);
+    setProvisioning(false);
+
+    // Step 1: Check localStorage
+    try {
+      const stored = localStorage.getItem(VENUE_CONFIG_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed.venueId && parsed.venueSlug) {
+          setVenueConfig(parsed);
+          setLoading(false);
+          return;
+        }
+      }
+    } catch (_) {}
+
+    // Step 2: Try ?venue=SLUG query param
+    const params = new URLSearchParams(window.location.search);
+    const slug = params.get("venue");
+    if (slug) {
+      supabase.from("venues").select("id, name").eq("slug", slug).single()
+        .then(({ data, error }) => {
+          if (!error && data) {
+            const config = { venueId: data.id, venueSlug: slug, venueLabel: data.name };
+            localStorage.setItem(VENUE_CONFIG_KEY, JSON.stringify(config));
+            setVenueConfig(config);
+            setProvisioning(false);
+          } else {
+            setProvisioning(true);
+          }
+          setLoading(false);
+        });
+      return;
+    }
+
+    // Step 3: Fall through to manual code entry
+    setProvisioning(true);
+    setLoading(false);
+  }, [epoch]);
+
+  const reprovision = useCallback(() => {
+    localStorage.removeItem(VENUE_CONFIG_KEY);
+    setVenueConfig(null);
+    setEpoch(e => e + 1);
+  }, []);
+
+  const onSetupComplete = useCallback((config) => {
+    localStorage.setItem(VENUE_CONFIG_KEY, JSON.stringify(config));
+    setVenueConfig(config);
+    setProvisioning(false);
+    setLoading(false);
+  }, []);
+
+  return {
+    venueId: venueConfig?.venueId || null,
+    venueSlug: venueConfig?.venueSlug || null,
+    venueLabel: venueConfig?.venueLabel || null,
+    loading,
+    provisioning,
+    reprovision,
+    onSetupComplete,
+  };
+}
+
 // ─── VenueNotFound ────────────────────────────────────────────────────────────
 function VenueNotFound() {
   return (
@@ -476,7 +552,7 @@ function VenueNotFound() {
 
 // ─── KioskRoute ───────────────────────────────────────────────────────────────
 function KioskRoute() {
-  const { venueSlug } = useParams();
+  const { venueSlug, kioskSlug } = useParams();
   const navigate = useNavigate();
   const { venueId, loading, notFound } = useVenue(venueSlug);
 
@@ -579,7 +655,7 @@ function KioskRoute() {
           </div>
         </div>
       )}
-      <KioskView venueId={venueId} />
+      <KioskView venueId={venueId} kioskSlug={kioskSlug} />
     </>
   );
 }
@@ -737,7 +813,7 @@ function KioskWelcome({ onStart }) {
   return (
     <div className="welcome-screen">
       <div>
-        <div className="welcome-logo" style={{ fontSize: 52 }}>VAPE <span className="glow">&</span> NICOTINE KIOSK</div>
+        <div className="welcome-logo">VAPE <span className="glow">&</span> NICOTINE KIOSK</div>
       </div>
       <div className="welcome-age-notice">
         <AlertTriangle size={16} style={{ display: "inline-block", verticalAlign: "middle", marginRight: 6 }} />This kiosk sells age-restricted products. You must be 18 or over to proceed.
@@ -1570,7 +1646,7 @@ function KioskOfflineOverlay() {
   );
 }
 
-function KioskView({ venueId: propVenueId }) {
+function KioskView({ venueId: propVenueId, kioskSlug }) {
   const [screen, setScreen] = useState("welcome");
   const [cart, setCart] = useState({});
   const [products, setProducts] = useState([]);
@@ -1593,8 +1669,10 @@ function KioskView({ venueId: propVenueId }) {
   const venueId = propVenueId || null;
   const kioskId = kioskDbId;
 
-  // Generate a stable device_id from venueId + browser, stored in localStorage
+  // If a named slug is in the URL, it IS the stable identity — no localStorage needed.
+  // Unnamed kiosks fall back to a localStorage-persisted random ID.
   const getDeviceId = () => {
+    if (kioskSlug) return `named_${(venueId || "demo").slice(0, 8)}_${kioskSlug}`;
     const key = `jarvid_device_id_${venueId || "default"}`;
     let id = localStorage.getItem(key);
     if (!id) {
@@ -1604,16 +1682,21 @@ function KioskView({ venueId: propVenueId }) {
     return id;
   };
 
+  const kioskDisplayName = kioskSlug
+    ? kioskSlug.replace(/-/g, " ").replace(/\b\w/g, l => l.toUpperCase())
+    : `Kiosk · ${(venueId || "").slice(0, 8)}`;
+
   const sendHeartbeat = async (dbId, devId) => {
     if (!venueId) return null;
     const { error } = await supabase.from("kiosks").upsert({
       id: dbId,
       device_id: devId,
       venue_id: venueId,
-      name: `Kiosk · ${venueId.slice(0, 8)}`,
+      name: kioskDisplayName,
       status: "online",
       last_heartbeat: new Date().toISOString(),
       app_version: "1.0.0",
+      archived: false,
     }, { onConflict: "device_id" });
     if (!error) {
       setIsOffline(false);
@@ -1639,8 +1722,9 @@ function KioskView({ venueId: propVenueId }) {
         const newId = crypto.randomUUID();
         const { error } = await supabase.from("kiosks").insert({
           id: newId, device_id: devId, venue_id: venueId,
-          name: `Kiosk · ${venueId.slice(0, 8)}`, status: "online",
+          name: kioskDisplayName, status: "online",
           last_heartbeat: new Date().toISOString(), app_version: "1.0.0",
+          archived: false,
         });
         if (!error) {
           setKioskDbId(newId);
@@ -1748,6 +1832,7 @@ function KioskView({ venueId: propVenueId }) {
 
   const handleActivity = () => {
     if (showTimeoutWarning) return;
+    if (screen === "welcome") return;
     resetInactivityTimer();
   };
 
@@ -1838,7 +1923,8 @@ function useOfflineKiosks(venueId) {
     const { data } = await supabase
       .from("kiosks")
       .select("id, name, device_id, last_heartbeat")
-      .eq("venue_id", venueId);
+      .eq("venue_id", venueId)
+      .eq("archived", false);
     if (!data) return;
     const now = Date.now();
     setOfflineKiosks(
@@ -3773,23 +3859,41 @@ function ManagerView({ user }) {
 function DeviceMonitor({ venues }) {
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [showArchived, setShowArchived] = useState(false);
   const refreshTimer = useRef(null);
 
   const loadDevices = async () => {
-    const { data } = await supabase
+    let q = supabase
       .from("kiosks")
-      .select("id, name, device_id, venue_id, status, last_heartbeat, app_version, venues(name)")
+      .select("id, name, device_id, venue_id, status, last_heartbeat, app_version, archived, venues(name)")
       .order("venue_id");
+    const { data } = await q;
     if (data) {
       const now = new Date();
       setDevices(data.map(k => ({
         ...k,
         venueName: k.venues?.name || "Unknown Venue",
-        isOnline: k.last_heartbeat && (now - new Date(k.last_heartbeat)) < 120000,
+        isOnline: !k.archived && k.last_heartbeat && (now - new Date(k.last_heartbeat)) < 120000,
         lastSeen: k.last_heartbeat ? new Date(k.last_heartbeat) : null,
       })));
     }
     setLoading(false);
+  };
+
+  const archiveKiosk = async (id) => {
+    await supabase.from("kiosks").update({ archived: true }).eq("id", id);
+    loadDevices();
+  };
+
+  const unarchiveKiosk = async (id) => {
+    await supabase.from("kiosks").update({ archived: false }).eq("id", id);
+    loadDevices();
+  };
+
+  const deleteKiosk = async (id) => {
+    if (!window.confirm("Permanently delete this kiosk record? This cannot be undone.")) return;
+    await supabase.from("kiosks").delete().eq("id", id);
+    loadDevices();
   };
 
   useEffect(() => {
@@ -3807,45 +3911,67 @@ function DeviceMonitor({ venues }) {
     return `${Math.floor(secs / 3600)}h ago`;
   };
 
+  const activeDevices = devices.filter(d => !d.archived);
+  const visibleDevices = showArchived ? devices : activeDevices;
+
   return (
     <>
-      <div>
-        <div className="section-title">DEVICE MONITORING</div>
-        <div className="section-sub">Live kiosk status — updates every 30 seconds</div>
+      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between" }}>
+        <div>
+          <div className="section-title">DEVICE MONITORING</div>
+          <div className="section-sub">Live kiosk status — updates every 30 seconds</div>
+        </div>
+        <button
+          className="btn-sm btn-outline"
+          onClick={() => setShowArchived(s => !s)}
+          style={{ marginBottom: 4 }}
+        >
+          {showArchived ? "Hide Archived" : `Show Archived (${devices.filter(d => d.archived).length})`}
+        </button>
       </div>
       <div className="stats-row">
         <div className="stat-card">
           <div className="stat-label">Total Devices</div>
-          <div className="stat-value">{devices.length}</div>
-          <div className="stat-sub">Registered kiosks</div>
+          <div className="stat-value">{activeDevices.length}</div>
+          <div className="stat-sub">Active kiosks</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Online</div>
-          <div className="stat-value" style={{ color: DS.colors.accent }}>{devices.filter(d => d.isOnline).length}</div>
+          <div className="stat-value" style={{ color: DS.colors.accent }}>{activeDevices.filter(d => d.isOnline).length}</div>
           <div className="stat-sub">Last heartbeat &lt;2 min</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Offline</div>
-          <div className="stat-value" style={{ color: devices.filter(d => !d.isOnline).length > 0 ? DS.colors.danger : DS.colors.textMuted }}>
-            {devices.filter(d => !d.isOnline).length}
+          <div className="stat-value" style={{ color: activeDevices.filter(d => !d.isOnline).length > 0 ? DS.colors.danger : DS.colors.textMuted }}>
+            {activeDevices.filter(d => !d.isOnline).length}
           </div>
           <div className="stat-sub">No recent heartbeat</div>
         </div>
       </div>
       <div className="chart-card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {loading && <div style={{ color: DS.colors.textMuted, fontSize: 13 }}>Loading devices…</div>}
-        {!loading && devices.length === 0 && (
+        {!loading && visibleDevices.length === 0 && (
           <div style={{ color: DS.colors.textMuted, fontSize: 13, textAlign: "center", padding: 32 }}>
             No devices registered yet. Devices appear here automatically once a kiosk loads for the first time.
           </div>
         )}
-        {devices.map(d => (
-          <div key={d.id} className="device-row">
+        {visibleDevices.map(d => (
+          <div key={d.id} className="device-row" style={{ opacity: d.archived ? 0.5 : 1 }}>
             <div style={{ flex: 1 }}>
-              <div className="device-name">{d.name || d.device_id}</div>
+              <div className="device-name" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                {d.name || d.device_id}
+                {d.archived && (
+                  <span className="tag-pill" style={{ background: DS.colors.surface, color: DS.colors.textMuted, fontSize: 10 }}>archived</span>
+                )}
+              </div>
               <div style={{ fontSize: 12, color: DS.colors.textMuted }}>{d.venueName}</div>
+              {d.device_id?.startsWith("named_") && (
+                <div style={{ fontSize: 11, color: DS.colors.textMuted, fontFamily: "monospace", marginTop: 2 }}>
+                  URL: /{d.venueName?.toLowerCase().replace(/\s+/g, "-")}/kiosk/{d.device_id.split("_").slice(2).join("_")}
+                </div>
+              )}
             </div>
-            <div className="device-status" style={{ gap: 16 }}>
+            <div className="device-status" style={{ gap: 12 }}>
               <div style={{ textAlign: "right" }}>
                 <div style={{ fontSize: 12, color: DS.colors.textMuted }}>Last seen</div>
                 <div style={{ fontSize: 13, color: d.isOnline ? DS.colors.accent : DS.colors.textSub }}>
@@ -3856,13 +3982,26 @@ function DeviceMonitor({ venues }) {
                 <div style={{ fontSize: 12, color: DS.colors.textMuted }}>Version</div>
                 <div style={{ fontSize: 13, color: DS.colors.textSub }}>{d.app_version || "—"}</div>
               </div>
-              <span className="tag-pill" style={{
-                background: d.isOnline ? DS.colors.accentGlow : DS.colors.dangerGlow,
-                color: d.isOnline ? DS.colors.accent : DS.colors.danger,
-                minWidth: 64, textAlign: "center",
-              }}>
-                <Circle size={7} fill={d.isOnline ? DS.colors.accent : DS.colors.danger} stroke="none" style={{ display: "inline-block", verticalAlign: "middle", marginRight: 4 }} />{d.isOnline ? "online" : "offline"}
-              </span>
+              {!d.archived && (
+                <span className="tag-pill" style={{
+                  background: d.isOnline ? DS.colors.accentGlow : DS.colors.dangerGlow,
+                  color: d.isOnline ? DS.colors.accent : DS.colors.danger,
+                  minWidth: 64, textAlign: "center",
+                }}>
+                  <Circle size={7} fill={d.isOnline ? DS.colors.accent : DS.colors.danger} stroke="none" style={{ display: "inline-block", verticalAlign: "middle", marginRight: 4 }} />
+                  {d.isOnline ? "online" : "offline"}
+                </span>
+              )}
+              <div style={{ display: "flex", gap: 6 }}>
+                {d.archived ? (
+                  <>
+                    <button className="btn-sm btn-outline" style={{ fontSize: 11 }} onClick={() => unarchiveKiosk(d.id)}>Restore</button>
+                    <button className="btn-sm" style={{ fontSize: 11, background: DS.colors.dangerGlow, color: DS.colors.danger, border: `1px solid ${DS.colors.danger}` }} onClick={() => deleteKiosk(d.id)}>Delete</button>
+                  </>
+                ) : (
+                  <button className="btn-sm btn-outline" style={{ fontSize: 11 }} onClick={() => archiveKiosk(d.id)}>Archive</button>
+                )}
+              </div>
             </div>
           </div>
         ))}
@@ -6105,7 +6244,8 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/"                   element={<RootPage />} />
-        <Route path="/:venueSlug/kiosk"   element={<KioskRoute />} />
+        <Route path="/:venueSlug/kiosk"              element={<KioskRoute />} />
+        <Route path="/:venueSlug/kiosk/:kioskSlug"  element={<KioskRoute />} />
         <Route path="/:venueSlug/staff"   element={<StaffRoute />} />
         <Route path="*"                   element={<VenueNotFound />} />
       </Routes>
