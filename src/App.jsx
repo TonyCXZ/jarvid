@@ -621,6 +621,10 @@ function useReprovisionEscape(setupCode, reprovision) {
   const tapCount = useRef(0);
   const tapTimer = useRef(null);
 
+  useEffect(() => {
+    return () => { clearTimeout(tapTimer.current); };
+  }, []);
+
   // Call from a tap handler to count taps; triggers overlay after 5 within 2s
   const handleEscapeTap = useCallback(() => {
     tapCount.current += 1;
@@ -813,17 +817,14 @@ function KioskRoute() {
 function KioskRouteDevice() {
   const { venueId, loading, provisioning, reprovision, onSetupComplete } = useVenueFromDevice();
 
-  const [kioskPin, setKioskPin] = useState(null);
   const [setupCode, setSetupCode] = useState(null);
 
   useEffect(() => {
     if (!venueId) return;
-    supabase.from("venues").select("kiosk_pin, setup_code").eq("id", venueId).single()
+    supabase.from("venues").select("setup_code").eq("id", venueId).single()
       .then(({ data }) => {
-        setKioskPin(data?.kiosk_pin || "1234");
         setSetupCode(data?.setup_code || null);
-      })
-      .catch(() => setKioskPin("1234"));
+      });
   }, [venueId]);
 
   const { escapeActive, escapeEntry, escapeError, escapeShake, handleEscapeTap, handleEscapeKey, dismissEscape } =
@@ -851,7 +852,7 @@ function KioskRouteDevice() {
       {/* Reprovision escape overlay — triggered by 5-tap on logo */}
       {escapeActive && (
         <div className="pin-overlay">
-          <div className="pin-card" style={{ animation: escapeShake ? "shake 0.4s ease" : "none" }}>
+          <div className="pin-box" style={{ animation: escapeShake ? "shake 0.4s ease" : "none" }}>
             <div className="pin-title">Admin: Enter Setup Code</div>
             <div className="pin-dots">
               {Array.from({ length: 6 }).map((_, i) => (
@@ -6533,7 +6534,7 @@ function StaffRouteDevice() {
       {/* Reprovision escape overlay — triggered by 5-tap on "STAFF ORDERS" heading */}
       {escapeActive && (
         <div className="pin-overlay">
-          <div className="pin-card" style={{ animation: escapeShake ? "shake 0.4s ease" : "none" }}>
+          <div className="pin-box" style={{ animation: escapeShake ? "shake 0.4s ease" : "none" }}>
             <div className="pin-title">Admin: Enter Setup Code</div>
             <div className="pin-dots">
               {Array.from({ length: 6 }).map((_, i) => (
