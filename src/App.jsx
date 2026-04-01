@@ -6460,6 +6460,77 @@ function StaffRoute() {
   );
 }
 
+// ─── StaffRouteDevice ────────────────────────────────────────────────────────
+// Fixed /staff route for Hexnode-provisioned staff tablets.
+// Kioskoid mode — no Supabase auth required, just the venue PIN lock.
+// 5-tap on "STAFF ORDERS" heading → enter setup_code → reprovision device.
+function StaffRouteDevice() {
+  const { venueId, loading, provisioning, reprovision, onSetupComplete } = useVenueFromDevice();
+
+  const [kioskPin, setKioskPin] = useState(null);
+  const [setupCode, setSetupCode] = useState(null);
+
+  useEffect(() => {
+    if (!venueId) return;
+    supabase.from("venues").select("kiosk_pin, setup_code").eq("id", venueId).single()
+      .then(({ data }) => {
+        setKioskPin(data?.kiosk_pin || "1234");
+        setSetupCode(data?.setup_code || null);
+      })
+      .catch(() => setKioskPin("1234"));
+  }, [venueId]);
+
+  const { escapeActive, escapeEntry, escapeError, escapeShake, triggerEscape, handleEscapeKey, dismissEscape } =
+    useReprovisionEscape(setupCode, reprovision);
+
+  if (loading) return (
+    <>
+      <GlobalStyles />
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: DS.colors.bg }}>
+        <div className="spinner" />
+      </div>
+    </>
+  );
+
+  if (provisioning) return <VenueSetup onComplete={onSetupComplete} />;
+
+  return (
+    <>
+      <GlobalStyles />
+      {/* Reprovision escape overlay — triggered by 5-tap on "STAFF ORDERS" heading */}
+      {escapeActive && (
+        <div className="pin-overlay">
+          <div className="pin-card" style={{ animation: escapeShake ? "shake 0.4s ease" : "none" }}>
+            <div className="pin-title">Admin: Enter Setup Code</div>
+            <div className="pin-dots">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="pin-dot" style={{ background: escapeEntry.length > i ? DS.colors.accent : DS.colors.border }} />
+              ))}
+            </div>
+            <div className="pin-grid">
+              {["1","2","3","4","5","6","7","8","9"].map(k => (
+                <button key={k} className="pin-key" onClick={() => handleEscapeKey(k)}>{k}</button>
+              ))}
+              <button className="pin-key" onClick={() => handleEscapeKey("clear")} style={{ fontSize: 13, color: DS.colors.textMuted }}>CLR</button>
+              <button className="pin-key" onClick={() => handleEscapeKey("0")}>0</button>
+              <button className="pin-key" onClick={() => handleEscapeKey("back")}><X size={16} /></button>
+            </div>
+            <div className="pin-error-msg">{escapeError}</div>
+            <button className="btn-sm btn-outline" style={{ marginTop: 8, width: "100%" }} onClick={dismissEscape}>Cancel</button>
+          </div>
+        </div>
+      )}
+      <StaffView
+        user={null}
+        kioskoidMode={true}
+        venueIdOverride={venueId}
+        kioskPin={kioskPin}
+        onUnlock={triggerEscape}
+      />
+    </>
+  );
+}
+
 export default function App() {
   return (
     <BrowserRouter>
