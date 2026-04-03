@@ -1935,7 +1935,8 @@ function KioskView({ venueId: propVenueId, kioskSlug }) {
     const devId = getDeviceId();
 
     const fetchReaderConfig = async (id) => {
-      const { data } = await supabase.from("kiosks").select("config").eq("id", id).single();
+      const { data, error } = await supabase.from("kiosks").select("config").eq("id", id).single();
+      if (error) { console.error("fetchReaderConfig error", error); return; }
       if (data?.config?.stripe_reader_id) {
         setStripeReaderId(data.config.stripe_reader_id);
       }
