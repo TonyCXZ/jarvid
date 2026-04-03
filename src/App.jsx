@@ -2,10 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { BrowserRouter, Routes, Route, useParams, useNavigate, useLocation, Link } from "react-router-dom";
 import { supabase } from "./supabase";
 import { loadStripeTerminal } from "@stripe/terminal-js";
-import { loadStripe } from "@stripe/stripe-js";
-import { Elements, CardElement, useStripe, useElements } from "@stripe/react-stripe-js";
 
-const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
 import {
   LayoutGrid, Droplets, Wind, Zap, RefreshCw,
   CreditCard, BookOpen, Smartphone, Camera, User,
@@ -1546,73 +1543,14 @@ function KioskAgeVerify({ onVerified, onBack, onHome, kioskId }) {
 }
 
 // ============================================================
-// KIOSK — CARD FORM (needs Elements context with clientSecret)
+// KIOSK — PAYMENT (Stripe Terminal)
 // ============================================================
-function CardForm({ total, onPaid, orderId, clientSecret, phase, setPhase }) {
-  const stripe = useStripe();
-  const elements = useElements();
-  const [cardError, setCardError] = useState(null);
-
-  const cardStyle = {
-    base: {
-      color: DS.colors.text,
-      fontFamily: DS.font.body,
-      fontSize: "16px",
-      "::placeholder": { color: DS.colors.textMuted },
-      iconColor: DS.colors.accent,
-    },
-    invalid: { color: DS.colors.danger },
-  };
-
-  const handlePay = async () => {
-    if (!stripe || !elements || phase !== "waiting") return;
-    setPhase("processing");
-    setCardError(null);
-    const card = elements.getElement(CardElement);
-    const { error: confirmError } = await stripe.confirmCardPayment(clientSecret, {
-      payment_method: { card },
-    });
-    if (confirmError) {
-      setCardError(confirmError.message);
-      setPhase("waiting");
-    } else {
-      setPhase("done");
-      setTimeout(() => onPaid(orderId), 1500);
-    }
-  };
-
-  return (
-    <div style={{ margin: "0 20px", display: "flex", flexDirection: "column", gap: 16 }}>
-      {cardError && <div className="error-banner">{cardError}</div>}
-      <div style={{ background: DS.colors.card, border: `1px solid ${DS.colors.border}`, borderRadius: 12, padding: "18px 20px" }}>
-        <CardElement options={{ style: cardStyle, hidePostalCode: true }} />
-      </div>
-      <button
-        className="btn-accent"
-        style={{ width: "100%", padding: "14px", fontSize: 16, fontWeight: 700, borderRadius: 10, cursor: phase === "processing" ? "default" : "pointer" }}
-        onClick={handlePay}
-        disabled={phase === "processing" || !stripe}
-      >
-        {phase === "processing"
-          ? <span style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "center" }}><Loader2 size={18} style={{ animation: "spin 1s linear infinite" }} /> Processing…</span>
-          : `Pay ${fmt(total)}`}
-      </button>
-      <div className="pay-methods" style={{ justifyContent: "center" }}>
-        {["Visa", "Mastercard", "Amex"].map(m => <div key={m} className="pay-method">{m}</div>)}
-      </div>
-      <div style={{ fontSize: 13, color: DS.colors.textMuted, textAlign: "center" }}>Powered by Stripe · PCI DSS Compliant · End-to-end encrypted</div>
-    </div>
-  );
-}
-
-// ============================================================
-// KIOSK — PAYMENT (Stripe Elements)
-// ============================================================
-function KioskPaymentInner({ cart, products, onPaid, onBack, onHome, verificationId, kioskId, venueId }) {
-  const [phase, setPhase] = useState("loading"); // loading | waiting | processing | done | error
+function KioskPaymentInner({ cart, products, onPaid, onBack, onHome, verificationId, kioskId, venueId, stripeReaderId }) {
+  const [phase, setPhase] = useState("loading"); // loading | connecting | waiting | processing | done | error
   const [orderId, setOrderId] = useState(null);
   const [clientSecret, setClientSecret] = useState(null);
   const [error, setError] = useState(null);
+  const terminalRef = useRef(null);
 
   const total = Object.entries(cart).reduce((s, [id, qty]) => {
     const p = products.find(x => x.id === id);
@@ -1620,6 +1558,12 @@ function KioskPaymentInner({ cart, products, onPaid, onBack, onHome, verificatio
   }, 0);
 
   useEffect(() => {
+    if (!stripeReaderId) {
+      setError("This kiosk is not configured for payments. Please ask a member of staff.");
+      setPhase("error");
+      return;
+    }
+
     const init = async () => {
       try {
         // 1. Check stock
@@ -1676,17 +1620,83 @@ function KioskPaymentInner({ cart, products, onPaid, onBack, onHome, verificatio
           body: { venue_id: venueId, cart: cartPayload, order_id: order.id },
         });
         if (piErr || !piData?.client_secret) throw new Error("Failed to initialise payment. Please try again.");
-
         setClientSecret(piData.client_secret);
+
+        // 6. Initialise Terminal SDK and connect reader
+        setPhase("connecting");
+        const StripeTerminal = await loadStripeTerminal();
+        const terminal = StripeTerminal.create({
+          onFetchConnectionToken: async () => {
+            const { data } = await supabase.functions.invoke("stripe-terminal-connection-token");
+            if (!data?.secret) throw new Error("Failed to get Terminal connection token");
+            return data.secret;
+          },
+          onUnexpectedReaderDisconnect: () => {
+            setError("Payment reader disconnected. Please ask a member of staff.");
+            setPhase("error");
+          },
+        });
+        terminalRef.current = terminal;
+
+        const discoverResult = await terminal.discoverReaders({ simulated: false });
+        if (discoverResult.error) throw new Error("Could not discover payment reader. Please ask a member of staff.");
+
+        const reader = discoverResult.discoveredReaders.find(r => r.id === stripeReaderId);
+        if (!reader) throw new Error("Payment reader offline. Please ensure the reader is powered on and connected to the network.");
+
+        const connectResult = await terminal.connectInternetReader(reader);
+        if (connectResult.error) throw new Error("Could not connect to payment reader. Please ask a member of staff.");
+
         setPhase("waiting");
+
+        // 7. Collect payment method on the reader
+        const collectResult = await terminal.collectPaymentMethod(piData.client_secret);
+        if (collectResult.error) {
+          if (collectResult.error.code === "canceled") {
+            setError("Payment was cancelled.");
+          } else {
+            setError(collectResult.error.message || "Payment could not be collected.");
+          }
+          setPhase("error");
+          return;
+        }
+
+        setPhase("processing");
+
+        // 8. Process (confirm) the payment
+        const processResult = await terminal.processPayment(collectResult.paymentIntent);
+        if (processResult.error) {
+          setError(processResult.error.message || "Payment declined. Please try another card.");
+          setPhase("error");
+          return;
+        }
+
+        setPhase("done");
+        setTimeout(() => onPaid(order.id), 1500);
       } catch (e) {
         console.error("Payment init error:", e);
-        setError("Unable to initialise payment. Please ask a member of staff.");
+        setError(e.message || "Unable to initialise payment. Please ask a member of staff.");
         setPhase("error");
       }
     };
+
     init();
+
+    return () => {
+      if (terminalRef.current) {
+        terminalRef.current.disconnectReader().catch(() => {});
+      }
+    };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const phaseLabel = {
+    loading: "PREPARING PAYMENT…",
+    connecting: "CONNECTING TO READER…",
+    waiting: "PRESENT CARD TO READER",
+    processing: "PROCESSING…",
+    done: "PAYMENT SUCCESS",
+    error: "PAYMENT UNAVAILABLE",
+  }[phase] ?? "PREPARING PAYMENT…";
 
   return (
     <div className="payment-screen" style={{ position: "relative" }}>
@@ -1694,22 +1704,32 @@ function KioskPaymentInner({ cart, products, onPaid, onBack, onHome, verificatio
       {error && <div className="error-banner" style={{ margin: "0 20px 16px" }}>{error}</div>}
       <div className="payment-heading">
         {phase === "done"
-          ? <span style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "center" }}><CheckCircle2 size={20} /> PAYMENT SUCCESS</span>
-          : phase === "processing" ? "PROCESSING…"
-          : phase === "loading" ? "PREPARING PAYMENT…"
-          : phase === "error" ? "PAYMENT UNAVAILABLE"
-          : "ENTER CARD DETAILS"}
+          ? <span style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "center" }}><CheckCircle2 size={20} /> {phaseLabel}</span>
+          : phaseLabel}
       </div>
       <div className="payment-amount">{fmt(total)}</div>
 
-      {(phase === "loading" || phase === "error") && (
+      {(phase === "loading" || phase === "connecting") && (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginTop: 32 }}>
+          <Loader2 size={40} style={{ animation: "spin 1s linear infinite", color: DS.colors.accent }} />
+        </div>
+      )}
+
+      {phase === "waiting" && (
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginTop: 32, gap: 16 }}>
-          {phase === "loading"
-            ? <Loader2 size={40} style={{ animation: "spin 1s linear infinite", color: DS.colors.accent }} />
-            : <XCircle size={40} style={{ color: DS.colors.danger }} />}
-          {phase === "error" && (
-            <button className="btn-sm btn-outline" onClick={onBack} style={{ marginTop: 8 }}>Go Back</button>
-          )}
+          <div className="nfc-icon" style={{ borderColor: DS.colors.accent }}>
+            <CreditCard size={36} style={{ color: DS.colors.accent }} />
+          </div>
+          <div style={{ fontSize: 15, color: DS.colors.textSub, textAlign: "center" }}>
+            Tap, insert or swipe your card on the reader
+          </div>
+          <div style={{ fontSize: 13, color: DS.colors.textMuted, textAlign: "center" }}>Powered by Stripe · PCI DSS Compliant</div>
+        </div>
+      )}
+
+      {phase === "processing" && (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginTop: 32 }}>
+          <Loader2 size={40} style={{ animation: "spin 1s linear infinite", color: DS.colors.accent }} />
         </div>
       )}
 
@@ -1719,10 +1739,11 @@ function KioskPaymentInner({ cart, products, onPaid, onBack, onHome, verificatio
         </div>
       )}
 
-      {(phase === "waiting" || phase === "processing") && clientSecret && (
-        <Elements stripe={stripePromise} options={{ clientSecret, disableLink: true }}>
-          <CardForm total={total} onPaid={onPaid} orderId={orderId} clientSecret={clientSecret} phase={phase} setPhase={setPhase} />
-        </Elements>
+      {phase === "error" && (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginTop: 32, gap: 16 }}>
+          <XCircle size={40} style={{ color: DS.colors.danger }} />
+          <button className="btn-sm btn-outline" onClick={onBack} style={{ marginTop: 8 }}>Go Back</button>
+        </div>
       )}
     </div>
   );
