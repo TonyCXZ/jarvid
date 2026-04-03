@@ -1546,11 +1546,14 @@ function KioskAgeVerify({ onVerified, onBack, onHome, kioskId }) {
 // KIOSK — PAYMENT (Stripe Terminal)
 // ============================================================
 function KioskPaymentInner({ cart, products, onPaid, onBack, onHome, verificationId, kioskId, venueId, stripeReaderId }) {
-  const [phase, setPhase] = useState("loading"); // loading | connecting | waiting | processing | done | error
+  const [phase, setPhase] = useState(stripeReaderId ? "loading" : "error"); // loading | connecting | waiting | processing | done | error
   const [orderId, setOrderId] = useState(null);
   const [clientSecret, setClientSecret] = useState(null);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState(stripeReaderId ? null : "This kiosk is not configured for payments. Please ask a member of staff.");
   const terminalRef = useRef(null);
+  const phaseRef = useRef(stripeReaderId ? "loading" : "error");
+
+  const updatePhase = (p) => { phaseRef.current = p; setPhase(p); };
 
   const total = Object.entries(cart).reduce((s, [id, qty]) => {
     const p = products.find(x => x.id === id);
@@ -1558,11 +1561,7 @@ function KioskPaymentInner({ cart, products, onPaid, onBack, onHome, verificatio
   }, 0);
 
   useEffect(() => {
-    if (!stripeReaderId) {
-      setError("This kiosk is not configured for payments. Please ask a member of staff.");
-      setPhase("error");
-      return;
-    }
+    if (!stripeReaderId) return;
 
     const init = async () => {
       try {
@@ -1604,14 +1603,9 @@ function KioskPaymentInner({ cart, products, onPaid, onBack, onHome, verificatio
         const { error: itemsErr } = await supabase.from("order_items").insert(items);
         if (itemsErr) throw itemsErr;
 
-        // 4. Decrement inventory
-        for (const item of items) {
-          await supabase.rpc("decrement_inventory", { p_product_id: item.product_id, p_venue_id: venueId || null, p_quantity: item.quantity });
-        }
-
         setOrderId(order.id);
 
-        // 5. Create Stripe payment intent
+        // 4. Create Stripe payment intent
         const cartPayload = Object.entries(cart).map(([product_id, qty]) => {
           const p = products.find(x => x.id === product_id);
           return { product_id, qty, retail_pence: GBPtoPence(p?.price || 0) };
@@ -1622,8 +1616,8 @@ function KioskPaymentInner({ cart, products, onPaid, onBack, onHome, verificatio
         if (piErr || !piData?.client_secret) throw new Error("Failed to initialise payment. Please try again.");
         setClientSecret(piData.client_secret);
 
-        // 6. Initialise Terminal SDK and connect reader
-        setPhase("connecting");
+        // 5. Initialise Terminal SDK and connect reader
+        updatePhase("connecting");
         const StripeTerminal = await loadStripeTerminal();
         const terminal = StripeTerminal.create({
           onFetchConnectionToken: async () => {
@@ -1633,7 +1627,7 @@ function KioskPaymentInner({ cart, products, onPaid, onBack, onHome, verificatio
           },
           onUnexpectedReaderDisconnect: () => {
             setError("Payment reader disconnected. Please ask a member of staff.");
-            setPhase("error");
+            updatePhase("error");
           },
         });
         terminalRef.current = terminal;
@@ -1647,9 +1641,9 @@ function KioskPaymentInner({ cart, products, onPaid, onBack, onHome, verificatio
         const connectResult = await terminal.connectInternetReader(reader);
         if (connectResult.error) throw new Error("Could not connect to payment reader. Please ask a member of staff.");
 
-        setPhase("waiting");
+        updatePhase("waiting");
 
-        // 7. Collect payment method on the reader
+        // 6. Collect payment method on the reader
         const collectResult = await terminal.collectPaymentMethod(piData.client_secret);
         if (collectResult.error) {
           if (collectResult.error.code === "canceled") {
@@ -1657,26 +1651,31 @@ function KioskPaymentInner({ cart, products, onPaid, onBack, onHome, verificatio
           } else {
             setError(collectResult.error.message || "Payment could not be collected.");
           }
-          setPhase("error");
+          updatePhase("error");
           return;
         }
 
-        setPhase("processing");
+        updatePhase("processing");
 
-        // 8. Process (confirm) the payment
+        // 7. Process (confirm) the payment
         const processResult = await terminal.processPayment(collectResult.paymentIntent);
         if (processResult.error) {
           setError(processResult.error.message || "Payment declined. Please try another card.");
-          setPhase("error");
+          updatePhase("error");
           return;
         }
 
-        setPhase("done");
+        // 8. Decrement inventory only after confirmed payment
+        for (const item of items) {
+          await supabase.rpc("decrement_inventory", { p_product_id: item.product_id, p_venue_id: venueId || null, p_quantity: item.quantity });
+        }
+
+        updatePhase("done");
         setTimeout(() => onPaid(order.id), 1500);
       } catch (e) {
         console.error("Payment init error:", e);
         setError(e.message || "Unable to initialise payment. Please ask a member of staff.");
-        setPhase("error");
+        updatePhase("error");
       }
     };
 
@@ -1684,6 +1683,9 @@ function KioskPaymentInner({ cart, products, onPaid, onBack, onHome, verificatio
 
     return () => {
       if (terminalRef.current) {
+        if (phaseRef.current === "waiting") {
+          terminalRef.current.cancelCollectPaymentMethod().catch(() => {});
+        }
         terminalRef.current.disconnectReader().catch(() => {});
       }
     };
