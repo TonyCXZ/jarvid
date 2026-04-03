@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { BrowserRouter, Routes, Route, useParams, useNavigate, useLocation, Link } from "react-router-dom";
 import { supabase } from "./supabase";
+import { loadStripeTerminal } from "@stripe/terminal-js";
 import { loadStripe } from "@stripe/stripe-js";
 import { Elements, CardElement, useStripe, useElements } from "@stripe/react-stripe-js";
 
@@ -1882,6 +1883,7 @@ function KioskView({ venueId: propVenueId, kioskSlug }) {
   const [kioskDbId, setKioskDbId] = useState(null);
   const [isOffline, setIsOffline] = useState(false);
   const [offlineRetryCount, setOfflineRetryCount] = useState(0);
+  const [stripeReaderId, setStripeReaderId] = useState(null);
   const offlineTimer = useRef(null);
   const retryTimer = useRef(null);
 
@@ -1932,6 +1934,13 @@ function KioskView({ venueId: propVenueId, kioskSlug }) {
     if (!venueId) return;
     const devId = getDeviceId();
 
+    const fetchReaderConfig = async (id) => {
+      const { data } = await supabase.from("kiosks").select("config").eq("id", id).single();
+      if (data?.config?.stripe_reader_id) {
+        setStripeReaderId(data.config.stripe_reader_id);
+      }
+    };
+
     const register = async () => {
       const { data } = await supabase.from("kiosks").select("id").eq("device_id", devId).single();
       if (data?.id) {
@@ -1939,6 +1948,7 @@ function KioskView({ venueId: propVenueId, kioskSlug }) {
         setKioskDbId(data.id);
         await supabase.from("kiosks").update({ status: "online", last_heartbeat: new Date().toISOString() }).eq("id", data.id);
         heartbeatTimer.current = setInterval(() => sendHeartbeat(data.id, devId), 60000);
+        await fetchReaderConfig(data.id);
       } else {
         // New kiosk — insert first, only set state on success
         const newId = crypto.randomUUID();
@@ -1951,6 +1961,7 @@ function KioskView({ venueId: propVenueId, kioskSlug }) {
         if (!error) {
           setKioskDbId(newId);
           heartbeatTimer.current = setInterval(() => sendHeartbeat(newId, devId), 60000);
+          await fetchReaderConfig(newId);
         } else {
           console.error("Kiosk registration failed", error);
         }
@@ -2103,6 +2114,7 @@ function KioskView({ venueId: propVenueId, kioskSlug }) {
           verificationId={verificationId}
           kioskId={kioskId}
           venueId={venueId}
+          stripeReaderId={stripeReaderId}
           onPaid={(oid) => { setPlacedOrderId(oid); setScreen("confirm"); }}
           onBack={() => setScreen("verify")}
           onHome={goHome}
