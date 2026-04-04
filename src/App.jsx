@@ -2882,6 +2882,9 @@ function ManagerView({ user }) {
   const [pinSaving, setPinSaving] = useState(false);
   const [pinSaved, setPinSaved] = useState(false);
   const [currentPin, setCurrentPin] = useState("");
+  const [readerIdEdits, setReaderIdEdits] = useState({}); // { [kioskId]: string }
+  const [readerIdSaving, setReaderIdSaving] = useState({}); // { [kioskId]: bool }
+  const [readerIdSaved, setReaderIdSaved] = useState({}); // { [kioskId]: bool }
   const isOrgAdmin = user?.role === "org_admin";
   const isAdmin = user?.role === "admin";
   const VENUE_ID = selectedVenueId;
@@ -2938,7 +2941,7 @@ function ManagerView({ user }) {
   const loadKiosks = async () => {
     const { data } = await supabase
       .from("kiosks")
-      .select("id, name, status, last_heartbeat, app_version, device_id")
+      .select("id, name, status, last_heartbeat, app_version, device_id, config")
       .eq("venue_id", VENUE_ID);
     if (data) {
       const now = new Date();
@@ -3184,6 +3187,19 @@ function ManagerView({ user }) {
     const { error } = await supabase.from("venues").update({ kiosk_pin: pinEdit }).eq("id", VENUE_ID);
     setPinSaving(false);
     if (!error) { setCurrentPin(pinEdit); setPinSaved(true); setTimeout(() => setPinSaved(false), 3000); }
+  };
+
+  const saveReaderId = async (kioskId, readerId) => {
+    setReaderIdSaving(s => ({ ...s, [kioskId]: true }));
+    const trimmed = readerId.trim();
+    const { data: existing } = await supabase.from("kiosks").select("config").eq("id", kioskId).single();
+    const newConfig = { ...(existing?.config || {}), stripe_reader_id: trimmed || null };
+    const { error } = await supabase.from("kiosks").update({ config: newConfig }).eq("id", kioskId);
+    if (!error) {
+      setReaderIdSaved(s => ({ ...s, [kioskId]: true }));
+      setTimeout(() => setReaderIdSaved(s => ({ ...s, [kioskId]: false })), 3000);
+    }
+    setReaderIdSaving(s => ({ ...s, [kioskId]: false }));
   };
 
   const loadAnalytics = async (view) => {
@@ -4057,6 +4073,38 @@ function ManagerView({ user }) {
                 )}
               </div>
             </div>
+            {kioskStatuses.length > 0 && (
+              <div className="chart-card" style={{ maxWidth: 480, marginTop: 16 }}>
+                <div className="chart-title" style={{ marginBottom: 4 }}>Terminal Reader</div>
+                <div style={{ fontSize: 13, color: DS.colors.textMuted, marginBottom: 20 }}>
+                  Pair each kiosk to its WisePOS E reader. Find the reader ID in Stripe Dashboard → Terminal → Readers.
+                </div>
+                {kioskStatuses.map(k => (
+                  <div key={k.id} style={{ marginBottom: 20 }}>
+                    <div style={{ fontSize: 11, color: DS.colors.textMuted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>
+                      {k.name || k.device_id || "Kiosk"}
+                    </div>
+                    <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                      <input
+                        type="text"
+                        placeholder="tmr_..."
+                        defaultValue={k.config?.stripe_reader_id || ""}
+                        onChange={e => setReaderIdEdits(s => ({ ...s, [k.id]: e.target.value }))}
+                        style={{ flex: 1, background: DS.colors.surface, border: `1px solid ${DS.colors.border}`, borderRadius: 8, padding: "10px 14px", color: DS.colors.text, fontSize: 14, fontFamily: DS.font.mono, outline: "none" }}
+                      />
+                      <button
+                        className={`btn-sm ${readerIdSaved[k.id] ? "" : "btn-accent"}`}
+                        onClick={() => saveReaderId(k.id, readerIdEdits[k.id] ?? k.config?.stripe_reader_id ?? "")}
+                        disabled={readerIdSaving[k.id]}
+                        style={readerIdSaved[k.id] ? { background: DS.colors.accentGlow, color: DS.colors.accent, borderColor: DS.colors.accent } : {}}
+                      >
+                        {readerIdSaving[k.id] ? "Saving…" : readerIdSaved[k.id] ? <span style={{ display: "flex", alignItems: "center", gap: 4 }}><Check size={12} /> Saved</span> : "Save"}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </>
         )}
       </div>
