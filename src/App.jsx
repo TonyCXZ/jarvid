@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, useParams, useNavigate, useLocation, Link
 import { supabase } from "./supabase";
 import { loadStripe } from "@stripe/stripe-js";
 import { Elements, CardElement, useStripe, useElements } from "@stripe/react-stripe-js";
+import { DiditSdk } from "@didit-protocol/sdk-web";
 
 const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
 import {
@@ -1285,79 +1286,121 @@ function KioskBrowse({ cart, onAddToCart, onRemoveFromCart, onCheckout, venueId,
 // ============================================================
 // KIOSK — AGE VERIFY (logs to Supabase)
 // ============================================================
-function KioskAgeVerify({ onVerified, onBack, onHome, kioskId }) {
-  // phases: choose | loading | yoti_sdk | manual_wait | success | failed
-  const [phase, setPhase] = useState("choose");
-  const [method, setMethod] = useState(null);
-  const [verificationId, setVerificationId] = useState(null);
-  const [sessionId, setSessionId] = useState(null);
-  const [clientSessionToken, setClientSessionToken] = useState(null);
+function KioskAgeVerify({ onVerified, onBack, onHome, kioskId, venueId }) {
+  // phases: loading | didit_sdk | pin_entry | manual_wait | success | failed
+  const [phase, setPhase] = useState("loading");
   const [error, setError] = useState(null);
-  const pollRef = useRef(null);
+  const [verificationId, setVerificationId] = useState(null);
+  const [pin, setPin] = useState("");
+  const [pinError, setPinError] = useState(null);
+  const [retryKey, setRetryKey] = useState(0);
+  const [staffPin, setStaffPin] = useState(null);
+  const sdkSupersededRef = useRef(false); // true once staff override accepted
 
-  // ── Polling — checks Yoti session state every 2s while SDK is active ────────
-  // TODO: Once Yoti account is active, verify state strings and pass/fail fields
-  //       match what yoti-poll-session returns for your chosen products.
+  // ── Fetch venue staff PIN ─────────────────────────────────────────────────
   useEffect(() => {
-    if (phase !== "yoti_sdk" || !sessionId) return;
+    if (!venueId) return;
+    supabase
+      .from("venues")
+      .select("staff_override_pin")
+      .eq("id", venueId)
+      .single()
+      .then(({ data }) => setStaffPin(data?.staff_override_pin || null));
+  }, [venueId]);
 
-    const poll = async () => {
+  // ── Create Didit session + init SDK ──────────────────────────────────────
+  useEffect(() => {
+    let cancelled = false;
+    sdkSupersededRef.current = false;
+    setPhase("loading");
+    setError(null);
+
+    const init = async () => {
       try {
-        const { data, error: fnErr } = await supabase.functions.invoke("yoti-poll-session", {
-          body: { session_id: sessionId },
+        const { data, error: fnErr } = await supabase.functions.invoke("didit-create-session", {
+          body: { venue_id: venueId, kiosk_id: kioskId },
         });
-        if (fnErr) return; // transient — keep polling
 
-        if (data?.state === "COMPLETED") {
-          clearInterval(pollRef.current);
-          const passed = data.passed === true;
-          const vid = await logVerification(method, passed ? "pass" : "fail");
-          setVerificationId(vid);
-          setPhase(passed ? "success" : "failed");
-        } else if (data?.state === "EXPIRED" || data?.state === "ABANDONED") {
-          clearInterval(pollRef.current);
-          setError("Session expired. Please try again.");
+        if (cancelled) return;
+        if (fnErr || !data?.url) throw new Error(fnErr?.message || "Failed to create session");
+
+        DiditSdk.shared.onComplete = async (result) => {
+          if (sdkSupersededRef.current) return; // staff override already handled
+          if (result.type === "completed") {
+            const passed = result.session?.status === "Approved";
+            const vid = await logVerification("didit", passed ? "pass" : "fail");
+            setVerificationId(vid);
+            setPhase(passed ? "success" : "failed");
+          } else if (result.type === "failed") {
+            setError(result.error?.message || "Verification failed. Please try again.");
+            setPhase("failed");
+          }
+        };
+
+        DiditSdk.shared.startVerification({
+          url: data.url,
+          configuration: {
+            embedded: true,
+            embeddedContainerId: "didit-container",
+            showCloseButton: false,
+            showExitConfirmation: false,
+            closeModalOnComplete: true,
+          },
+        });
+
+        if (!cancelled) setPhase("didit_sdk");
+      } catch (e) {
+        if (!cancelled) {
+          console.error("Didit init error:", e);
+          setError(e.message || "Could not start verification. Please ask a member of staff.");
           setPhase("failed");
         }
-      } catch (e) {
-        console.error("Yoti poll error:", e);
       }
     };
 
-    pollRef.current = setInterval(poll, 2000);
-    return () => clearInterval(pollRef.current);
-  }, [phase, sessionId]);
+    init();
+    return () => { cancelled = true; };
+  }, [kioskId, venueId, retryKey]);
 
-  // ── TODO: Yoti web SDK initialisation ───────────────────────────────────────
-  // Once you have Yoti credentials, initialise their web SDK here when phase === "yoti_sdk".
-  // The SDK renders its own camera / QR UI into #yoti-verification-container.
-  //
-  // Likely pattern (confirm exact API from Yoti docs / Hub integration guide):
-  //   useEffect(() => {
-  //     if (phase !== "yoti_sdk" || !clientSessionToken) return;
-  //     const script = document.createElement("script");
-  //     script.src = "https://www.yoti.com/share/client/";  // TODO: confirm URL
-  //     script.onload = () => {
-  //       window.Yoti.createVerification({
-  //         clientSdkId: import.meta.env.VITE_YOTI_CLIENT_SDK_ID,
-  //         sessionId,
-  //         containerId: "yoti-verification-container",
-  //         onSuccess: () => { /* polling will catch the COMPLETED state */ },
-  //         onError:   (err) => { setError(err.message); setPhase("failed"); },
-  //       });
-  //     };
-  //     document.body.appendChild(script);
-  //     return () => document.body.removeChild(script);
-  //   }, [phase, clientSessionToken]);
-  // ────────────────────────────────────────────────────────────────────────────
+  // ── Staff override handlers ───────────────────────────────────────────────
+  const handleStaffOverride = () => {
+    setPin("");
+    setPinError(null);
+    setPhase("pin_entry");
+  };
 
-  const logVerification = async (methodName, result) => {
+  const handlePinCancel = () => {
+    setPin("");
+    setPinError(null);
+    setPhase("didit_sdk");
+  };
+
+  const handlePinSubmit = async () => {
+    if (!staffPin) {
+      setPinError("No staff PIN configured for this venue. Contact your administrator.");
+      return;
+    }
+    if (pin !== staffPin) {
+      setPinError("Incorrect PIN. Please try again.");
+      setPin("");
+      return;
+    }
+    // Correct PIN — supersede the SDK and manually approve
+    sdkSupersededRef.current = true;
+    setPhase("manual_wait");
+    const vid = await logVerification("staff_check", "pass");
+    setVerificationId(vid);
+    setTimeout(() => setPhase("success"), 2000);
+  };
+
+  // ── Audit log helper ──────────────────────────────────────────────────────
+  const logVerification = async (method, result) => {
     try {
       const { data, error } = await supabase
         .from("age_verifications")
         .insert({
           kiosk_id: kioskId || null,
-          method: methodName.toLowerCase().replace(/\s+/g, "_"),
+          method,
           result,
           user_token_hash: `anon_${Math.random().toString(36).substr(2, 8)}`,
           verified_at: new Date().toISOString(),
@@ -1372,174 +1415,113 @@ function KioskAgeVerify({ onVerified, onBack, onHome, kioskId }) {
     }
   };
 
-  // Maps UI method labels → edge function method keys
-  const METHOD_MAP = {
-    "Driving Licence": "doc_scan_driving_licence",
-    "Passport":        "doc_scan_passport",
-    "Yoti":            "yoti_digital_id",
-    "AI Camera":       "age_scan",
-  };
+  const navButtons = <KioskNav onBack={undefined} onHome={onHome} showBack={false} />;
+  const sdkVisible = phase === "didit_sdk" || phase === "pin_entry";
 
-  const startScan = async (m) => {
-    setMethod(m);
-    setPhase("loading");
-    setError(null);
-
-    try {
-      const { data, error: fnErr } = await supabase.functions.invoke("yoti-create-session", {
-        body: { method: METHOD_MAP[m] ?? "age_scan" },
-      });
-
-      if (fnErr || !data?.session_id) {
-        throw new Error(fnErr?.message || "Failed to create Yoti session");
-      }
-
-      setSessionId(data.session_id);
-      setClientSessionToken(data.client_session_token);
-      setPhase("yoti_sdk");
-    } catch (e) {
-      console.error("Yoti session creation error:", e);
-      setError(e.message || "Could not start verification. Please try another method or ask staff.");
-      setPhase("failed");
-    }
-  };
-
-  const manualApproval = () => {
-    setMethod("Staff Check");
-    setPhase("manual_wait");
-    setTimeout(async () => {
-      const vid = await logVerification("Staff Check", "pass");
-      setVerificationId(vid);
-      setPhase("success");
-    }, 4000);
-  };
-
-  const navButtons = <KioskNav onBack={phase === "choose" ? onBack : undefined} onHome={onHome} showBack={phase === "choose"} />;
-
-  // ── Phase: success ────────────────────────────────────────────────────────
-  if (phase === "success") {
-    return (
-      <div className="age-verify-screen" style={{ position: "relative" }}>
-        {navButtons}
-        <div style={{ color: DS.colors.accent }}><CheckCircle2 size={80} strokeWidth={1.5} /></div>
-        <div className="age-heading" style={{ color: DS.colors.accent }}>AGE VERIFIED</div>
-        <div className="age-sub">Your identity has been confirmed via <strong style={{ color: DS.colors.white }}>{method}</strong>. Proceeding to payment.</div>
-        <button className="btn-primary" onClick={() => onVerified(verificationId)}>CONTINUE TO PAYMENT →</button>
-      </div>
-    );
-  }
-
-  // ── Phase: failed ─────────────────────────────────────────────────────────
-  if (phase === "failed") {
-    return (
-      <div className="age-verify-screen" style={{ position: "relative" }}>
-        {navButtons}
-        <div style={{ color: DS.colors.danger }}><XCircle size={80} strokeWidth={1.5} /></div>
-        <div className="age-heading" style={{ color: DS.colors.danger }}>VERIFICATION FAILED</div>
-        <div className="age-sub">{error || "We could not verify your age. Please try another method or ask a member of staff."}</div>
-        <button
-          className="btn-primary"
-          style={{ background: DS.colors.card, border: `1px solid ${DS.colors.border}`, color: DS.colors.text }}
-          onClick={() => { setPhase("choose"); setError(null); }}
-        >
-          TRY AGAIN
-        </button>
-      </div>
-    );
-  }
-
-  // ── Phase: manual_wait ────────────────────────────────────────────────────
-  if (phase === "manual_wait") {
-    return (
-      <div className="age-verify-screen" style={{ position: "relative" }}>
-        {navButtons}
-        <div style={{ color: DS.colors.warn }}><User size={60} strokeWidth={1.5} /></div>
-        <div className="age-heading">STAFF VERIFICATION</div>
-        <div className="age-sub">A staff member will verify your age shortly. Please wait…</div>
-        <div className="scanning-animation" style={{ borderColor: DS.colors.warn }}>
-          <div className="scan-line" style={{ background: `linear-gradient(90deg, transparent, ${DS.colors.warn}, transparent)` }} />
-          <div style={{ color: DS.colors.warn }}><Clock size={40} strokeWidth={1.5} /></div>
-          <div className="scan-text" style={{ color: DS.colors.warn }}>Awaiting staff approval</div>
-        </div>
-      </div>
-    );
-  }
-
-  // ── Phase: loading ────────────────────────────────────────────────────────
-  if (phase === "loading") {
-    return (
-      <div className="age-verify-screen" style={{ position: "relative" }}>
-        {navButtons}
-        <div className="age-heading">STARTING VERIFICATION</div>
-        <div className="scanning-animation">
-          <div className="scan-line" />
-          <div style={{ color: DS.colors.accent, zIndex: 1, animation: "spin 1s linear infinite" }}>
-            <Loader2 size={40} strokeWidth={1.5} />
-          </div>
-          <div className="scan-text">Connecting to Yoti…</div>
-        </div>
-      </div>
-    );
-  }
-
-  // ── Phase: yoti_sdk ───────────────────────────────────────────────────────
-  // Container for the Yoti web SDK. The SDK renders its camera / QR UI here.
-  // Polling (above) watches for COMPLETED state while the SDK is active.
-  // TODO: Add the Yoti SDK useEffect (commented out above) once credentials are ready.
-  if (phase === "yoti_sdk") {
-    return (
-      <div className="age-verify-screen" style={{ position: "relative" }}>
-        {navButtons}
-        <div className="age-heading">VERIFY YOUR AGE</div>
-        <div className="age-sub">Follow the instructions below</div>
-        <div
-          id="yoti-verification-container"
-          style={{
-            width: "100%",
-            maxWidth: 480,
-            minHeight: 320,
-            borderRadius: 16,
-            border: `1px solid ${DS.colors.border}`,
-            background: DS.colors.card,
-            overflow: "hidden",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          {/* Yoti SDK renders into this div once initialised */}
-          <div style={{ color: DS.colors.textMuted, fontSize: 13 }}>Initialising Yoti…</div>
-        </div>
-        <div style={{ fontSize: 12, color: DS.colors.textMuted }}>Session active • waiting for result…</div>
-      </div>
-    );
-  }
-
-  // ── Phase: choose (default) ───────────────────────────────────────────────
   return (
-    <div className="age-verify-screen" style={{ position: "relative" }}>
+    <div className="age-verify-screen" style={{ position: "relative", padding: sdkVisible ? 0 : undefined }}>
       {navButtons}
-      <div className="age-heading">VERIFY YOUR AGE</div>
-      <div className="age-sub">You must be 18+ to purchase. Choose a verification method below.</div>
-      <div className="verify-options">
-        {[
-          { m: "Driving Licence", icon: CreditCard,  desc: "Scan UK driving licence barcode" },
-          { m: "Passport",        icon: BookOpen,    desc: "Scan passport MRZ" },
-          { m: "Yoti",            icon: Smartphone,  desc: "Show Yoti QR code" },
-          { m: "AI Camera",       icon: Camera,      desc: "Camera facial analysis" },
-        ].map(v => (
-          <div key={v.m} className="verify-option" onClick={() => startScan(v.m)}>
-            <div className="verify-icon" style={{ color: DS.colors.accent }}><v.icon size={52} strokeWidth={1.5} /></div>
-            <div className="verify-label">{v.m}</div>
-            <div className="verify-desc">{v.desc}</div>
-          </div>
-        ))}
-        <div className="verify-option" onClick={manualApproval} style={{ borderColor: DS.colors.warn }}>
-          <div className="verify-icon" style={{ color: DS.colors.warn }}><User size={52} strokeWidth={1.5} /></div>
-          <div className="verify-label">Staff Override</div>
-          <div className="verify-desc">Ask staff to verify</div>
+
+      {/* ── Loading ── */}
+      {phase === "loading" && (
+        <div style={{ color: DS.colors.textSub, fontSize: 17 }}>Setting up verification…</div>
+      )}
+
+      {/* ── Didit SDK container + staff override / PIN entry ── */}
+      {sdkVisible && (
+        <div style={{ width: "100%", flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}>
+          {/* Container stays mounted throughout didit_sdk AND pin_entry so SDK keeps its DOM node */}
+          <div
+            id="didit-container"
+            style={{
+              width: "100%",
+              maxWidth: 480,
+              flex: 1,
+              minHeight: 600,
+              borderRadius: 16,
+              overflow: "hidden",
+              display: phase === "didit_sdk" ? "block" : "none",
+            }}
+          />
+          {/* Staff override link — visible only during active SDK phase */}
+          {phase === "didit_sdk" && (
+            <div style={{ padding: "12px 24px", textAlign: "center" }}>
+              <button
+                onClick={handleStaffOverride}
+                style={{ background: "none", border: "none", color: DS.colors.textMuted, fontSize: 13, cursor: "pointer", textDecoration: "underline" }}
+              >
+                Staff Override
+              </button>
+            </div>
+          )}
+          {/* PIN entry — shown instead of Didit container when phase === "pin_entry" */}
+          {phase === "pin_entry" && (
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 24, padding: 40, textAlign: "center" }}>
+              <div style={{ color: DS.colors.accent }}><Shield size={60} strokeWidth={1.5} /></div>
+              <div className="age-heading" style={{ fontSize: 32 }}>STAFF OVERRIDE</div>
+              <div className="age-sub">Enter the staff PIN to manually approve this customer.</div>
+              <input
+                type="password"
+                inputMode="numeric"
+                maxLength={8}
+                value={pin}
+                autoFocus
+                onChange={e => { setPin(e.target.value.replace(/\D/g, "")); setPinError(null); }}
+                onKeyDown={e => e.key === "Enter" && handlePinSubmit()}
+                style={{
+                  fontSize: 28,
+                  letterSpacing: 12,
+                  textAlign: "center",
+                  width: 180,
+                  padding: "12px 16px",
+                  background: DS.colors.card,
+                  border: `2px solid ${pinError ? DS.colors.danger : DS.colors.border}`,
+                  borderRadius: 12,
+                  color: DS.colors.white,
+                  fontFamily: DS.font.mono,
+                }}
+              />
+              {pinError && <div style={{ color: DS.colors.danger, fontSize: 14 }}>{pinError}</div>}
+              <div style={{ display: "flex", gap: 12 }}>
+                <button className="btn-primary" style={{ padding: "14px 32px", fontSize: 20 }} onClick={handlePinCancel}>CANCEL</button>
+                <button className="btn-primary" style={{ padding: "14px 32px", fontSize: 20 }} onClick={handlePinSubmit}>CONFIRM</button>
+              </div>
+            </div>
+          )}
         </div>
-      </div>
+      )}
+
+      {/* ── Manual wait ── */}
+      {phase === "manual_wait" && (
+        <>
+          <div style={{ color: DS.colors.accent }}><Shield size={60} strokeWidth={1.5} /></div>
+          <div className="age-heading" style={{ fontSize: 28 }}>STAFF APPROVED</div>
+          <div className="age-sub">Staff override accepted. Proceeding to payment.</div>
+        </>
+      )}
+
+      {/* ── Success ── */}
+      {phase === "success" && (
+        <>
+          <div style={{ color: DS.colors.accent }}><CheckCircle2 size={80} strokeWidth={1.5} /></div>
+          <div className="age-heading" style={{ color: DS.colors.accent }}>AGE VERIFIED</div>
+          <div className="age-sub">Identity confirmed. Proceeding to payment.</div>
+          <button className="btn-primary" onClick={() => onVerified(verificationId)}>CONTINUE TO PAYMENT →</button>
+        </>
+      )}
+
+      {/* ── Failed ── */}
+      {phase === "failed" && (
+        <>
+          <div style={{ color: DS.colors.danger }}><XCircle size={80} strokeWidth={1.5} /></div>
+          <div className="age-heading" style={{ color: DS.colors.danger, fontSize: 32 }}>VERIFICATION FAILED</div>
+          <div className="age-sub">{error || "We could not verify your age. Please ask a member of staff for assistance."}</div>
+          <div style={{ display: "flex", gap: 12 }}>
+            <button className="btn-primary" style={{ padding: "14px 32px", fontSize: 20 }} onClick={onBack}>GO BACK</button>
+            <button className="btn-primary" style={{ padding: "14px 32px", fontSize: 20 }} onClick={() => setRetryKey(k => k + 1)}>TRY AGAIN</button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -2094,6 +2076,7 @@ function KioskView({ venueId: propVenueId, kioskSlug }) {
           onBack={() => setScreen("browse")}
           onHome={goHome}
           kioskId={kioskId}
+          venueId={venueId}
         />
       )}
       {screen === "payment" && (
