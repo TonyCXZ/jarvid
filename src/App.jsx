@@ -4349,6 +4349,9 @@ function AdminView() {
   const [venuePSHistory, setVenuePSHistory] = useState({}); // { venueId: [records] }
   const [showingHistoryId, setShowingHistoryId] = useState(null);
   const [connectingStripeId, setConnectingStripeId] = useState(null);
+  const [staffPinEdits, setStaffPinEdits] = useState({});   // { [venueId]: string }
+  const [staffPinSaving, setStaffPinSaving] = useState({});  // { [venueId]: bool }
+  const [staffPinSaved, setStaffPinSaved] = useState({});    // { [venueId]: bool }
 
   // Users
   const [users, setUsers] = useState([]);
@@ -4453,7 +4456,28 @@ function AdminView() {
       todaySales: penceToGBP((revenueResults[i]?.data || []).reduce((s, o) => s + (o.total_pence || 0), 0)),
       status: "online",
     })));
+    const pinMap = {};
+    data.forEach(v => { pinMap[v.id] = v.staff_override_pin || ""; });
+    setStaffPinEdits(pinMap);
     setLoadingVenues(false);
+  };
+
+  const saveStaffPin = async (venueId, pin) => {
+    const trimmed = (pin || "").trim();
+    if (trimmed && !/^\d{4,8}$/.test(trimmed)) {
+      alert("PIN must be 4–8 digits.");
+      return;
+    }
+    setStaffPinSaving(s => ({ ...s, [venueId]: true }));
+    const { error } = await supabase
+      .from("venues")
+      .update({ staff_override_pin: trimmed || null })
+      .eq("id", venueId);
+    if (!error) {
+      setStaffPinSaved(s => ({ ...s, [venueId]: true }));
+      setTimeout(() => setStaffPinSaved(s => ({ ...s, [venueId]: false })), 3000);
+    }
+    setStaffPinSaving(s => ({ ...s, [venueId]: false }));
   };
 
   const saveVenue = async () => {
@@ -5165,6 +5189,30 @@ function AdminView() {
                       </div>
                       <div style={{ fontSize: 11, color: DS.colors.textMuted, marginTop: 4 }}>
                         Used for device provisioning and re-provisioning
+                      </div>
+                    </div>
+                    <div style={{ marginBottom: 4 }}>
+                      <div style={{ fontSize: 11, color: DS.colors.textMuted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>
+                        Staff Override PIN
+                      </div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <input
+                          type="password"
+                          inputMode="numeric"
+                          maxLength={8}
+                          placeholder="4–8 digit PIN"
+                          value={staffPinEdits[v.id] ?? ""}
+                          onChange={e => setStaffPinEdits(s => ({ ...s, [v.id]: e.target.value.replace(/\D/g, "") }))}
+                          style={{ flex: 1, background: DS.colors.surface, border: `1px solid ${DS.colors.border}`, borderRadius: 6, padding: "6px 10px", color: DS.colors.white, fontSize: 14, fontFamily: DS.font.mono }}
+                        />
+                        <button
+                          className="btn-sm btn-outline"
+                          disabled={staffPinSaving[v.id]}
+                          style={staffPinSaved[v.id] ? { color: DS.colors.accent, borderColor: DS.colors.accent } : {}}
+                          onClick={() => saveStaffPin(v.id, staffPinEdits[v.id] ?? "")}
+                        >
+                          {staffPinSaved[v.id] ? <><Check size={12} /> Saved</> : staffPinSaving[v.id] ? "Saving…" : "Save"}
+                        </button>
                       </div>
                     </div>
                     <div style={{ marginBottom: 4 }}>
