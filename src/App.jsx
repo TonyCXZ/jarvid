@@ -1287,28 +1287,18 @@ function KioskBrowse({ cart, onAddToCart, onRemoveFromCart, onCheckout, venueId,
 // KIOSK — AGE VERIFY (logs to Supabase)
 // ============================================================
 function KioskAgeVerify({ onVerified, onBack, onHome, kioskId, venueId }) {
-  // phases: loading | didit_sdk | pin_entry | manual_wait | success | failed
+  // phases: loading | didit_sdk | awaiting_staff | manual_wait | success | failed
   const [phase, setPhase] = useState("loading");
   const [error, setError] = useState(null);
   const [verificationId, setVerificationId] = useState(null);
-  const [pin, setPin] = useState("");
-  const [pinError, setPinError] = useState(null);
   const [retryKey, setRetryKey] = useState(0);
-  const [staffPin, setStaffPin] = useState(null);
+  const [approvalId, setApprovalId] = useState(null); // age_approval_requests row ID
   const sdkSupersededRef = useRef(false); // true once staff override accepted
 
-  // ── Fetch venue staff PIN ─────────────────────────────────────────────────
-  useEffect(() => {
-    if (!venueId) return;
-    supabase
-      .from("venues")
-      .select("staff_override_pin")
-      .eq("id", venueId)
-      .single()
-      .then(({ data }) => setStaffPin(data?.staff_override_pin || null));
-  }, [venueId]);
 
   // ── Create Didit session + init SDK ──────────────────────────────────────
+  const testMode = import.meta.env.VITE_DIDIT_TEST_MODE === "true";
+
   useEffect(() => {
     let cancelled = false;
     sdkSupersededRef.current = false;
@@ -1316,6 +1306,39 @@ function KioskAgeVerify({ onVerified, onBack, onHome, kioskId, venueId }) {
     setError(null);
 
     const init = async () => {
+      // Reuse existing pending/approved request, or create a fresh one
+      let currentApprovalId = null;
+      if (venueId) {
+        // Check for an existing request for this kiosk
+        const { data: existing } = await supabase.from("age_approval_requests")
+          .select("id, status").eq("kiosk_id", kioskId || "").eq("venue_id", venueId)
+          .in("status", ["pending", "approved"]).order("created_at", { ascending: false }).limit(1).single();
+
+        if (existing?.status === "approved" && !cancelled) {
+          // Already approved by staff — skip everything
+          const vid = await logVerification("staff_check", "pass");
+          setVerificationId(vid);
+          setPhase("success");
+          return;
+        }
+
+        if (existing) {
+          currentApprovalId = existing.id;
+          if (!cancelled) setApprovalId(existing.id);
+        } else {
+          const { data: req } = await supabase.from("age_approval_requests")
+            .insert({ kiosk_id: kioskId || null, venue_id: venueId, status: "pending" })
+            .select().single();
+          if (req && !cancelled) { currentApprovalId = req.id; setApprovalId(req.id); }
+        }
+      }
+
+      // TEST MODE: skip Didit API, go straight to sdk phase for staff PIN testing
+      if (testMode) {
+        if (!cancelled) setPhase("didit_sdk");
+        return;
+      }
+
       try {
         const { data, error: fnErr } = await supabase.functions.invoke("didit-create-session", {
           body: { venue_id: venueId, kiosk_id: kioskId },
@@ -1325,7 +1348,7 @@ function KioskAgeVerify({ onVerified, onBack, onHome, kioskId, venueId }) {
         if (fnErr || !data?.url) throw new Error(fnErr?.message || "Failed to create session");
 
         DiditSdk.shared.onComplete = async (result) => {
-          if (sdkSupersededRef.current) return; // staff override already handled
+          if (sdkSupersededRef.current) return;
           if (result.type === "completed") {
             const passed = result.session?.status === "Approved";
             const vid = await logVerification("didit", passed ? "pass" : "fail");
@@ -1362,35 +1385,38 @@ function KioskAgeVerify({ onVerified, onBack, onHome, kioskId, venueId }) {
     return () => { cancelled = true; };
   }, [kioskId, venueId, retryKey]);
 
-  // ── Staff override handlers ───────────────────────────────────────────────
+  // ── Realtime: watch for staff approval ───────────────────────────────────
+  useEffect(() => {
+    if (!approvalId) return;
+    const channel = supabase
+      .channel(`approval-${approvalId}`)
+      .on("postgres_changes", {
+        event: "UPDATE", schema: "public", table: "age_approval_requests",
+        filter: `id=eq.${approvalId}`,
+      }, async (payload) => {
+        if (payload.new.status === "approved" && !sdkSupersededRef.current) {
+          sdkSupersededRef.current = true;
+          const vid = await logVerification("staff_check", "pass");
+          setVerificationId(vid);
+          setPhase("success");
+        } else if (payload.new.status === "denied") {
+          setError("Staff did not approve this request. Please ask for assistance.");
+          setPhase("failed");
+        }
+      })
+      .subscribe();
+    return () => supabase.removeChannel(channel);
+  }, [approvalId]);
+
+  // ── Staff override: show waiting screen (request already created on mount) ─
   const handleStaffOverride = () => {
-    setPin("");
-    setPinError(null);
-    setPhase("pin_entry");
-  };
-
-  const handlePinCancel = () => {
-    setPin("");
-    setPinError(null);
-    setPhase("didit_sdk");
-  };
-
-  const handlePinSubmit = async () => {
-    if (!staffPin) {
-      setPinError("No staff PIN configured for this venue. Contact your administrator.");
-      return;
-    }
-    if (pin !== staffPin) {
-      setPinError("Incorrect PIN. Please try again.");
-      setPin("");
-      return;
-    }
-    // Correct PIN — supersede the SDK and manually approve
+    setPhase("awaiting_staff");
     sdkSupersededRef.current = true;
-    setPhase("manual_wait");
-    const vid = await logVerification("staff_check", "pass");
-    setVerificationId(vid);
-    setTimeout(() => setPhase("success"), 2000);
+  };
+
+  const handleStaffOverrideCancel = () => {
+    sdkSupersededRef.current = false;
+    setPhase("didit_sdk");
   };
 
   // ── Audit log helper ──────────────────────────────────────────────────────
@@ -1416,7 +1442,7 @@ function KioskAgeVerify({ onVerified, onBack, onHome, kioskId, venueId }) {
   };
 
   const navButtons = <KioskNav onBack={undefined} onHome={onHome} showBack={false} />;
-  const sdkVisible = phase === "didit_sdk" || phase === "pin_entry";
+  const sdkVisible = phase === "didit_sdk";
 
   return (
     <div className="age-verify-screen" style={{ position: "relative", padding: sdkVisible ? 0 : undefined }}>
@@ -1427,68 +1453,44 @@ function KioskAgeVerify({ onVerified, onBack, onHome, kioskId, venueId }) {
         <div style={{ color: DS.colors.textSub, fontSize: 17 }}>Setting up verification…</div>
       )}
 
-      {/* ── Didit SDK container + staff override / PIN entry ── */}
+      {/* ── Didit SDK container ── */}
       {sdkVisible && (
         <div style={{ width: "100%", flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}>
-          {/* Container stays mounted throughout didit_sdk AND pin_entry so SDK keeps its DOM node */}
           <div
             id="didit-container"
-            style={{
-              width: "100%",
-              maxWidth: 480,
-              flex: 1,
-              minHeight: 600,
-              borderRadius: 16,
-              overflow: "hidden",
-              display: phase === "didit_sdk" ? "block" : "none",
-            }}
-          />
-          {/* Staff override link — visible only during active SDK phase */}
-          {phase === "didit_sdk" && (
-            <div style={{ padding: "12px 24px", textAlign: "center" }}>
-              <button
-                onClick={handleStaffOverride}
-                style={{ background: "none", border: "none", color: DS.colors.textMuted, fontSize: 13, cursor: "pointer", textDecoration: "underline" }}
-              >
-                Staff Override
-              </button>
-            </div>
-          )}
-          {/* PIN entry — shown instead of Didit container when phase === "pin_entry" */}
-          {phase === "pin_entry" && (
-            <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 24, padding: 40, textAlign: "center" }}>
-              <div style={{ color: DS.colors.accent }}><Shield size={60} strokeWidth={1.5} /></div>
-              <div className="age-heading" style={{ fontSize: 32 }}>STAFF OVERRIDE</div>
-              <div className="age-sub">Enter the staff PIN to manually approve this customer.</div>
-              <input
-                type="password"
-                inputMode="numeric"
-                maxLength={8}
-                value={pin}
-                autoFocus
-                onChange={e => { setPin(e.target.value.replace(/\D/g, "")); setPinError(null); }}
-                onKeyDown={e => e.key === "Enter" && handlePinSubmit()}
-                style={{
-                  fontSize: 28,
-                  letterSpacing: 12,
-                  textAlign: "center",
-                  width: 180,
-                  padding: "12px 16px",
-                  background: DS.colors.card,
-                  border: `2px solid ${pinError ? DS.colors.danger : DS.colors.border}`,
-                  borderRadius: 12,
-                  color: DS.colors.white,
-                  fontFamily: DS.font.mono,
-                }}
-              />
-              {pinError && <div style={{ color: DS.colors.danger, fontSize: 14 }}>{pinError}</div>}
-              <div style={{ display: "flex", gap: 12 }}>
-                <button className="btn-primary" style={{ padding: "14px 32px", fontSize: 20 }} onClick={handlePinCancel}>CANCEL</button>
-                <button className="btn-primary" style={{ padding: "14px 32px", fontSize: 20 }} onClick={handlePinSubmit}>CONFIRM</button>
+            style={{ width: "100%", maxWidth: 480, flex: 1, minHeight: 600, borderRadius: 16, overflow: "hidden" }}
+          >
+            {testMode && (
+              <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, background: DS.colors.card, borderRadius: 16, padding: 40, textAlign: "center" }}>
+                <div style={{ fontSize: 13, fontFamily: DS.font.mono, color: DS.colors.accent, background: "#1a2a1a", border: `1px solid ${DS.colors.accent}`, borderRadius: 6, padding: "4px 12px" }}>TEST MODE</div>
+                <div style={{ fontSize: 18, color: DS.colors.textSub }}>Didit verification skipped</div>
+                <div style={{ fontSize: 13, color: DS.colors.textMuted }}>Use Staff Override below to test the flow, or ask a staff member to approve on their tablet.</div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
+          <div style={{ padding: "12px 24px", textAlign: "center" }}>
+            <button
+              onClick={handleStaffOverride}
+              style={{ background: "none", border: "none", color: DS.colors.textMuted, fontSize: 13, cursor: "pointer", textDecoration: "underline" }}
+            >
+              Staff Override
+            </button>
+          </div>
         </div>
+      )}
+
+      {/* ── Awaiting staff approval ── */}
+      {phase === "awaiting_staff" && (
+        <>
+          <div style={{ color: DS.colors.accent }}><Shield size={60} strokeWidth={1.5} /></div>
+          <div className="age-heading" style={{ fontSize: 28 }}>WAITING FOR STAFF</div>
+          <div className="age-sub">A staff member needs to approve your age on their tablet. Please wait.</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
+            <div style={{ width: 10, height: 10, borderRadius: "50%", background: DS.colors.accent, animation: "pulse 1.5s infinite" }} />
+            <span style={{ fontSize: 14, color: DS.colors.textMuted }}>Waiting for approval…</span>
+          </div>
+          <button className="btn-primary" style={{ marginTop: 24, padding: "12px 28px", fontSize: 16 }} onClick={handleStaffOverrideCancel}>CANCEL</button>
+        </>
       )}
 
       {/* ── Manual wait ── */}
@@ -1866,6 +1868,7 @@ function KioskView({ venueId: propVenueId, kioskSlug }) {
   const [offlineRetryCount, setOfflineRetryCount] = useState(0);
   const offlineTimer = useRef(null);
   const retryTimer = useRef(null);
+  const earlyApprovalCreatedRef = useRef(false);
 
   const INACTIVITY_SECONDS = 90;
   const WARNING_SECONDS = 30;
@@ -1990,6 +1993,13 @@ function KioskView({ venueId: propVenueId, kioskSlug }) {
   }, [isOffline, offlineRetryCount, checkSupabaseConn]);
 
   const goHome = () => {
+    if (venueId) {
+      const deviceId = kioskId || getDeviceId();
+      supabase.from("age_approval_requests")
+        .update({ status: "expired", resolved_at: new Date().toISOString() })
+        .eq("status", "pending").eq("kiosk_id", deviceId);
+    }
+    earlyApprovalCreatedRef.current = false;
     setCart({});
     setVerificationId(null);
     setPlacedOrderId(null);
@@ -2046,7 +2056,30 @@ function KioskView({ venueId: propVenueId, kioskSlug }) {
     resetInactivityTimer();
   };
 
-  const addToCart = (id) => { handleActivity(); setCart(c => ({ ...c, [id]: (c[id] || 0) + 1 })); };
+  const addToCart = (id) => {
+    handleActivity();
+    setCart(c => ({ ...c, [id]: (c[id] || 0) + 1 }));
+  };
+
+  // Track the early approval request ID so checkout can check it
+  const [earlyApprovalId, setEarlyApprovalId] = useState(null);
+
+  // When cart goes from empty → non-empty, create a pending approval request
+  const cartIsEmpty = Object.keys(cart).length === 0;
+  useEffect(() => {
+    if (cartIsEmpty) { earlyApprovalCreatedRef.current = false; setEarlyApprovalId(null); return; }
+    if (earlyApprovalCreatedRef.current || !venueId) return;
+    earlyApprovalCreatedRef.current = true;
+    const deviceId = kioskId || getDeviceId();
+    supabase.from("age_approval_requests")
+      .delete().eq("status", "pending").eq("kiosk_id", deviceId)
+      .then(() =>
+        supabase.from("age_approval_requests")
+          .insert({ kiosk_id: deviceId, kiosk_name: kioskDisplayName, venue_id: venueId, status: "pending" })
+          .select().single()
+          .then(({ data }) => { if (data) setEarlyApprovalId(data.id); })
+      );
+  }, [cartIsEmpty, venueId, kioskId]);
   const removeFromCart = (id) => { handleActivity(); setCart(c => {
     const n = { ...c };
     if (n[id] > 1) n[id]--;
@@ -2064,7 +2097,27 @@ function KioskView({ venueId: propVenueId, kioskSlug }) {
           cart={cart}
           onAddToCart={addToCart}
           onRemoveFromCart={removeFromCart}
-          onCheckout={() => setScreen("verify")}
+          onCheckout={async () => {
+            if (earlyApprovalId) {
+              const { data } = await supabase.from("age_approval_requests")
+                .select("status").eq("id", earlyApprovalId).single();
+              if (data?.status === "approved") {
+                // Staff already approved — log and skip to payment
+                await supabase.from("age_verifications").insert({
+                  kiosk_id: kioskId || null,
+                  method: "staff_check",
+                  result: "pass",
+                  user_token_hash: `anon_${Math.random().toString(36).substr(2, 8)}`,
+                  verified_at: new Date().toISOString(),
+                });
+                setEarlyApprovalId(null);
+                earlyApprovalCreatedRef.current = false;
+                setScreen("payment");
+                return;
+              }
+            }
+            setScreen("verify");
+          }}
           venueId={venueId}
           onProductsLoaded={setProducts}
           onHome={goHome}
@@ -2290,6 +2343,13 @@ function StaffView({ user, kioskoidMode, venueIdOverride, kioskPin: kioskPinProp
   const [rejectReason, setRejectReason] = useState("");
   const [rejectOther, setRejectOther] = useState("");
 
+  // Age approval requests
+  const [pendingApprovals, setPendingApprovals] = useState([]);
+  const [approvingId, setApprovingId] = useState(null); // ID of request being approved
+  const [approvalPin, setApprovalPin] = useState("");
+  const [approvalPinError, setApprovalPinError] = useState("");
+  const [venueStaffPin, setVenueStaffPin] = useState(null);
+
   // Live clock for timeout highlighting — ticks every 10s
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -2453,8 +2513,10 @@ function StaffView({ user, kioskoidMode, venueIdOverride, kioskPin: kioskPinProp
   useEffect(() => {
     const vid = venueIdOverride || user?.venue_id;
     if (vid) {
-      supabase.from("venues").select("name").eq("id", vid).single()
-        .then(({ data }) => { if (data) setVenueName(data.name); });
+      supabase.from("venues").select("name, staff_override_pin").eq("id", vid).single()
+        .then(({ data }) => {
+          if (data) { setVenueName(data.name); setVenueStaffPin(data.staff_override_pin || null); }
+        });
     }
   }, [user?.venue_id, venueIdOverride]);
 
@@ -2514,6 +2576,58 @@ function StaffView({ user, kioskoidMode, venueIdOverride, kioskPin: kioskPinProp
     return () => supabase.removeChannel(channel);
   }, [loadOrders, venueIdOverride]);
 
+  // ── Age approval requests ─────────────────────────────────────────────────
+  const loadApprovals = useCallback(async () => {
+    const vid = venueIdOverride || user?.venue_id;
+    if (!vid) return;
+    const { data } = await supabase
+      .from("age_approval_requests")
+      .select("*")
+      .eq("venue_id", vid)
+      .eq("status", "pending")
+      .order("created_at", { ascending: true });
+    setPendingApprovals(data || []);
+  }, [venueIdOverride, user?.venue_id]);
+
+  useEffect(() => {
+    loadApprovals();
+    const channel = supabase
+      .channel("approvals-channel")
+      .on("postgres_changes", { event: "*", schema: "public", table: "age_approval_requests" }, () => {
+        loadApprovals();
+      })
+      .subscribe();
+    return () => supabase.removeChannel(channel);
+  }, [loadApprovals]);
+
+  const handleApprovalPin = async (key) => {
+    if (key === "clear") { setApprovalPin(""); setApprovalPinError(""); return; }
+    if (key === "back") { setApprovalPin(p => p.slice(0, -1)); setApprovalPinError(""); return; }
+    const next = approvalPin + key;
+    setApprovalPin(next);
+    if (next.length >= 4 && next.length === (venueStaffPin || "").length) {
+      if (next === venueStaffPin) {
+        await supabase.from("age_approval_requests")
+          .update({ status: "approved", resolved_at: new Date().toISOString() })
+          .eq("id", approvingId);
+        setApprovingId(null);
+        setApprovalPin("");
+        setApprovalPinError("");
+        playAlertSound();
+      } else {
+        setApprovalPinError("Incorrect PIN");
+        setTimeout(() => { setApprovalPin(""); setApprovalPinError(""); }, 600);
+      }
+    }
+  };
+
+  const handleApprovalDeny = async (id) => {
+    await supabase.from("age_approval_requests")
+      .update({ status: "denied", resolved_at: new Date().toISOString() })
+      .eq("id", id);
+    setPendingApprovals(p => p.filter(r => r.id !== id));
+  };
+
   const updateStatus = async (id, status) => {
     const { error: err } = await supabase
       .from("orders")
@@ -2540,6 +2654,60 @@ function StaffView({ user, kioskoidMode, venueIdOverride, kioskPin: kioskPinProp
 
   return (
     <div className="staff-layout">
+
+      {/* ── Pending age approval banner ── */}
+      {pendingApprovals.length > 0 && (
+        <div style={{ background: DS.colors.warn + "22", border: `1px solid ${DS.colors.warn}`, borderRadius: 10, margin: "0 0 12px 0", padding: "12px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+          <Shield size={20} style={{ color: DS.colors.warn, flexShrink: 0 }} />
+          <div style={{ flex: 1 }}>
+            <span style={{ fontWeight: 700, color: DS.colors.warn, fontSize: 13 }}>AGE VERIFICATION REQUIRED: </span>
+            <span style={{ fontSize: 13, color: DS.colors.text }}>
+              {pendingApprovals.map(r => r.kiosk_name || "Kiosk").join(", ")} {pendingApprovals.length === 1 ? "has" : "have"} a customer waiting for approval.
+            </span>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {pendingApprovals.map(r => (
+              <div key={r.id} style={{ display: "flex", gap: 6 }}>
+                <button
+                  className="btn-sm btn-accent"
+                  onClick={() => { setApprovingId(r.id); setApprovalPin(""); setApprovalPinError(""); }}
+                >
+                  Approve{pendingApprovals.length > 1 ? ` (${r.kiosk_name || "Kiosk"})` : ""}
+                </button>
+                <button className="btn-sm btn-outline" style={{ color: DS.colors.danger, borderColor: DS.colors.danger }} onClick={() => handleApprovalDeny(r.id)}>
+                  Deny
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── PIN modal for approving age request ── */}
+      {approvingId && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ background: DS.colors.card, borderRadius: 20, padding: 40, width: 340, textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: 20 }}>
+            <div style={{ color: DS.colors.accent }}><Shield size={48} strokeWidth={1.5} /></div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: DS.colors.text }}>APPROVE AGE</div>
+            <div style={{ fontSize: 14, color: DS.colors.textSub }}>Enter the staff override PIN to approve this customer.</div>
+            <div style={{ display: "flex", gap: 10 }}>
+              {[1,2,3,4,5,6,7,8].slice(0, (venueStaffPin || "0000").length).map((_, i) => (
+                <div key={i} style={{ width: 14, height: 14, borderRadius: "50%", background: i < approvalPin.length ? DS.colors.accent : DS.colors.border }} />
+              ))}
+            </div>
+            {approvalPinError && <div style={{ color: DS.colors.danger, fontSize: 13 }}>{approvalPinError}</div>}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, width: "100%" }}>
+              {["1","2","3","4","5","6","7","8","9","back","0","clear"].map(k => (
+                <button key={k} onClick={() => handleApprovalPin(k)}
+                  style={{ padding: "14px 0", fontSize: k === "back" || k === "clear" ? 13 : 22, fontWeight: 600, borderRadius: 10, border: `1px solid ${DS.colors.border}`, background: k === "back" || k === "clear" ? DS.colors.surface : DS.colors.bg, color: DS.colors.text, cursor: "pointer" }}
+                >{k === "back" ? "⌫" : k === "clear" ? "CLR" : k}</button>
+              ))}
+            </div>
+            <button className="btn-sm btn-outline" onClick={() => { setApprovingId(null); setApprovalPin(""); setApprovalPinError(""); }}>CANCEL</button>
+          </div>
+        </div>
+      )}
+
       <div className="staff-header">
         <div>
           <div className="staff-heading" onClick={handleLogoTap} style={{ cursor: kioskoidMode ? "pointer" : "default", userSelect: "none" }}>STAFF ORDERS</div>
@@ -6448,7 +6616,7 @@ function StaffDashboard({ user, venueId, onLogout }) {
           </div>
         </nav>
         <div className="main-content">
-          {activeTab === "staff" && (user ? <StaffView user={user} kioskoidMode={false} /> : null)}
+          {activeTab === "staff" && (user ? <StaffView user={user} kioskoidMode={false} venueIdOverride={venueId} /> : null)}
           {activeTab === "manager" && ((isManager || isOrgAdmin || isAdmin) ? <ManagerView user={user} /> : (
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", flexDirection: "column", gap: 16, color: DS.colors.textMuted }}>
               <Lock size={48} strokeWidth={1.5} />
