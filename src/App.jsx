@@ -1433,25 +1433,23 @@ function KioskAgeVerify({ onVerified, onBack, onHome, kioskId, venueId }) {
     }
   };
 
-  const navButtons = <KioskNav onBack={undefined} onHome={onHome} showBack={false} />;
   const sdkVisible = phase === "didit_sdk";
 
   return (
     <div className="age-verify-screen" style={{ position: "relative", padding: sdkVisible ? 0 : undefined }}>
-      {navButtons}
+      <KioskNav onBack={undefined} onHome={onHome} showBack={false} />
 
       {/* ── Loading ── */}
       {phase === "loading" && (
         <div style={{ color: DS.colors.textSub, fontSize: 17 }}>Setting up verification…</div>
       )}
 
-      {/* ── Didit SDK container ── */}
-      {sdkVisible && (
-        <div style={{ width: "100%", flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}>
-          <div
-            id="didit-container"
-            style={{ width: "100%", maxWidth: 480, flex: 1, minHeight: 600, borderRadius: 16, overflow: "hidden" }}
-          />
+      {/* ── Didit SDK container — always in DOM so SDK can mount before phase changes ── */}
+      <div style={{ display: sdkVisible ? "flex" : "none", width: "100%", flex: 1, flexDirection: "column", alignItems: "center" }}>
+        <div
+          id="didit-container"
+          style={{ width: "100%", maxWidth: 480, flex: 1, minHeight: 600, borderRadius: 16, overflow: "hidden" }}
+        />
           <div style={{ padding: "12px 24px", textAlign: "center" }}>
             <button
               onClick={handleStaffOverride}
@@ -1460,8 +1458,7 @@ function KioskAgeVerify({ onVerified, onBack, onHome, kioskId, venueId }) {
               Staff Override
             </button>
           </div>
-        </div>
-      )}
+      </div>
 
       {/* ── Awaiting staff approval ── */}
       {phase === "awaiting_staff" && (
