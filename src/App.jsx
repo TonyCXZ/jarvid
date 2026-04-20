@@ -1297,8 +1297,6 @@ function KioskAgeVerify({ onVerified, onBack, onHome, kioskId, venueId }) {
 
 
   // ── Create Didit session + init SDK ──────────────────────────────────────
-  const testMode = import.meta.env.VITE_DIDIT_TEST_MODE === "true";
-
   useEffect(() => {
     let cancelled = false;
     sdkSupersededRef.current = false;
@@ -1331,12 +1329,6 @@ function KioskAgeVerify({ onVerified, onBack, onHome, kioskId, venueId }) {
             .select().single();
           if (req && !cancelled) { currentApprovalId = req.id; setApprovalId(req.id); }
         }
-      }
-
-      // TEST MODE: skip Didit API, go straight to sdk phase for staff PIN testing
-      if (testMode) {
-        if (!cancelled) setPhase("didit_sdk");
-        return;
       }
 
       try {
