@@ -1451,15 +1451,7 @@ function KioskAgeVerify({ onVerified, onBack, onHome, kioskId, venueId }) {
           <div
             id="didit-container"
             style={{ width: "100%", maxWidth: 480, flex: 1, minHeight: 600, borderRadius: 16, overflow: "hidden" }}
-          >
-            {testMode && (
-              <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, background: DS.colors.card, borderRadius: 16, padding: 40, textAlign: "center" }}>
-                <div style={{ fontSize: 13, fontFamily: DS.font.mono, color: DS.colors.accent, background: "#1a2a1a", border: `1px solid ${DS.colors.accent}`, borderRadius: 6, padding: "4px 12px" }}>TEST MODE</div>
-                <div style={{ fontSize: 18, color: DS.colors.textSub }}>Didit verification skipped</div>
-                <div style={{ fontSize: 13, color: DS.colors.textMuted }}>Use Staff Override below to test the flow, or ask a staff member to approve on their tablet.</div>
-              </div>
-            )}
-          </div>
+          />
           <div style={{ padding: "12px 24px", textAlign: "center" }}>
             <button
               onClick={handleStaffOverride}
