@@ -143,6 +143,13 @@ const GlobalStyles = () => (
     .btn-primary:hover { transform: scale(1.03); box-shadow: 0 6px 64px rgba(240,168,48,0.65), 0 2px 16px rgba(0,0,0,0.4); }
     .btn-primary:active { transform: scale(0.98); }
 
+    /* ── Welcome screen landscape (tablet in landscape has limited height) ── */
+    @media (orientation: landscape) and (max-height: 900px) {
+      .welcome-screen { gap: 16px; padding: 20px 40px; }
+      .welcome-logo { font-size: clamp(48px, 10vh, 100px); }
+      .welcome-age-notice { padding: 12px 24px; font-size: 13px; line-height: 1.5; }
+    }
+
     /* ── Browse layout ── */
     .browse-layout { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
     .browse-header { padding: 64px 24px 0; display: flex; align-items: center; gap: 16px; flex-shrink: 0; }
