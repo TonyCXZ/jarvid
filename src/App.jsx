@@ -144,10 +144,10 @@ const GlobalStyles = () => (
     .btn-primary:active { transform: scale(0.98); }
 
     /* ── Welcome screen landscape (tablet in landscape has limited height) ── */
-    @media (orientation: landscape) and (max-height: 900px) {
-      .welcome-screen { gap: 16px; padding: 20px 40px; }
-      .welcome-logo { font-size: clamp(48px, 10vh, 100px); }
-      .welcome-age-notice { padding: 12px 24px; font-size: 13px; line-height: 1.5; }
+    @media (orientation: landscape) {
+      .welcome-screen { gap: 12px; padding: 16px 40px; }
+      .welcome-logo { font-size: clamp(48px, 8vh, 90px); }
+      .welcome-age-notice { padding: 10px 24px; font-size: 13px; line-height: 1.4; }
     }
 
     /* ── Browse layout ── */
