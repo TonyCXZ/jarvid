@@ -111,12 +111,12 @@ const GlobalStyles = () => (
   <style>{`
     @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body, #root { width: 100%; height: 100%; background: ${DS.colors.bg}; color: ${DS.colors.text}; font-family: ${DS.font.body}; overflow: hidden; }
+    html, body, #root { width: 100%; height: 100dvh; background: ${DS.colors.bg}; color: ${DS.colors.text}; font-family: ${DS.font.body}; overflow: hidden; }
     ::-webkit-scrollbar { width: 4px; }
     ::-webkit-scrollbar-track { background: ${DS.colors.surface}; }
     ::-webkit-scrollbar-thumb { background: ${DS.colors.border}; border-radius: 2px; }
 
-    .app-root { width: 100vw; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+    .app-root { width: 100vw; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
 
     /* ── Navigation ── */
     .top-nav { display: flex; align-items: center; gap: 0; background: ${DS.colors.surface}; border-bottom: 1px solid ${DS.colors.border}; box-shadow: 0 1px 0 rgba(240,168,48,0.06); padding: 0 24px; height: 56px; flex-shrink: 0; }
@@ -414,7 +414,7 @@ const GlobalStyles = () => (
     .tag-pill { display: inline-flex; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; }
 
     /* ── Auth screen ── */
-    .auth-screen { width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; background: radial-gradient(ellipse 70% 50% at 50% 40%, rgba(240,168,48,0.07) 0%, transparent 65%); }
+    .auth-screen { width: 100vw; height: 100dvh; display: flex; align-items: center; justify-content: center; background: radial-gradient(ellipse 70% 50% at 50% 40%, rgba(240,168,48,0.07) 0%, transparent 65%); }
     .auth-card { width: 420px; padding: 52px 44px; background: ${DS.colors.surface}; border: 1px solid ${DS.colors.border}; border-radius: 22px; display: flex; flex-direction: column; gap: 28px; box-shadow: 0 24px 64px rgba(0,0,0,0.6); }
     .auth-logo { font-family: 'Bebas Neue', sans-serif; font-size: 52px; letter-spacing: 0.08em; color: white; text-align: center; line-height: 1; }
     .auth-logo span { color: #f0a830; text-shadow: 0 0 32px rgba(240,168,48,0.5); }
@@ -579,7 +579,7 @@ function VenueSetup({ onComplete }) {
     <>
       <GlobalStyles />
       <div style={{
-        width: "100%", height: "100vh", display: "flex", flexDirection: "column",
+        width: "100%", height: "100dvh", display: "flex", flexDirection: "column",
         alignItems: "center", justifyContent: "center",
         background: DS.colors.bg, color: DS.colors.text, fontFamily: DS.font.body,
         gap: 0,
@@ -695,7 +695,7 @@ function VenueNotFound() {
       <GlobalStyles />
       <div style={{
         display: "flex", flexDirection: "column", alignItems: "center",
-        justifyContent: "center", height: "100vh",
+        justifyContent: "center", height: "100dvh",
         background: "#0a0a0f", color: "#fff", gap: 16, fontFamily: "sans-serif"
       }}>
         <div style={{ fontSize: 48 }}>🏚</div>
@@ -767,7 +767,7 @@ function KioskRoute() {
   if (loading) return (
     <>
       <GlobalStyles />
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "#0a0a0f" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100dvh", background: "#0a0a0f" }}>
         <div className="spinner" />
       </div>
     </>
@@ -846,7 +846,7 @@ function KioskRouteDevice() {
   if (loading) return (
     <>
       <GlobalStyles />
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: DS.colors.bg }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100dvh", background: DS.colors.bg }}>
         <div className="spinner" />
       </div>
     </>
@@ -6536,7 +6536,7 @@ function VenuePicker({ user }) {
       <GlobalStyles />
       <div style={{
         display: "flex", flexDirection: "column", alignItems: "center",
-        justifyContent: "center", minHeight: "100vh",
+        justifyContent: "center", minHeight: "100dvh",
         background: "#0a0a0f", color: "#fff", gap: 24, padding: 32
       }}>
         <div style={{ fontSize: 22, fontWeight: 700 }}>Select Venue</div>
@@ -6601,7 +6601,7 @@ function RootPage() {
   if (!authChecked) return (
     <>
       <GlobalStyles />
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "#0a0a0f" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100dvh", background: "#0a0a0f" }}>
         <div className="spinner" />
       </div>
     </>
@@ -6751,7 +6751,7 @@ function StaffRoute() {
   if (!authChecked || venueLoading) return (
     <>
       <GlobalStyles />
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "#0a0a0f" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100dvh", background: "#0a0a0f" }}>
         <div className="spinner" />
       </div>
     </>
@@ -6793,7 +6793,7 @@ function StaffRouteDevice() {
   if (loading) return (
     <>
       <GlobalStyles />
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: DS.colors.bg }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100dvh", background: DS.colors.bg }}>
         <div className="spinner" />
       </div>
     </>
